@@ -1,15 +1,30 @@
 import os
 import time
+import argparse
 import pandas as pd
 import duckdb
 
 def main():
+    parser = argparse.ArgumentParser(description="SMART raw 속성 누적 무결성 분석 스크립트")
+    parser.add_argument(
+        "--file",
+        type=str,
+        help="분석할 특정 Parquet 파일 경로 지정. 지정할 경우 해당 파일의 이름을 기준으로 EDA 결과 폴더가 생성됩니다."
+    )
+    args = parser.parse_args()
+    
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
     eda_dir = os.path.join(project_dir, "eda")
-    model = "ST12000NM0007"
     
-    file_path = os.path.join(data_dir, f"{model}.parquet")
+    if args.file:
+        file_path = args.file
+        filename = os.path.basename(file_path)
+        model = os.path.splitext(filename)[0]
+    else:
+        model = "ST12000NM0007"
+        file_path = os.path.join(data_dir, f"{model}.parquet")
+        
     output_dir = os.path.join(eda_dir, model)
     os.makedirs(output_dir, exist_ok=True)
     

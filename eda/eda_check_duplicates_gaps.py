@@ -5,8 +5,8 @@ import time
 import duckdb
 import pandas as pd
 
-def get_selected_models():
-    """분석할 모델 리스트를 결정합니다 (명령줄 인자 또는 대화형 메뉴)."""
+def parse_arguments():
+    """명령줄 인자를 파싱합니다."""
     all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
     
     parser = argparse.ArgumentParser(description="중복 행 및 시계열 빈 날짜(공백) 건수 계산 스크립트")
@@ -16,19 +16,28 @@ def get_selected_models():
         choices=all_models,
         help="분석을 수행할 하나 이상의 모델명을 지정합니다. 생략하면 전체 모델이 분석됩니다."
     )
+    parser.add_argument(
+        "--file",
+        type=str,
+        help="분석할 특정 Parquet 파일 경로 지정. 지정할 경우 해당 파일의 이름을 기준으로 EDA 결과 폴더가 생성됩니다."
+    )
     args, unknown = parser.parse_known_args()
-    
-    if args.models:
-        return args.models
-        
-    return all_models
+    return args
 
 def main():
-    selected_models = get_selected_models()
+    args = parse_arguments()
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
     eda_dir = os.path.join(project_dir, "EDA")
+    
+    if args.file:
+        filename = os.path.basename(args.file)
+        model = os.path.splitext(filename)[0]
+        targets = [(model, args.file)]
+    else:
+        selected_models = args.models if args.models else ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
+        targets = [(model, os.path.join(data_dir, f"{model}.parquet")) for model in selected_models]
     
     con = duckdb.connect(database=":memory:")
     
@@ -36,12 +45,11 @@ def main():
     print("중복 행 및 시계열 공백 터미널 분석 시작")
     print("=" * 70)
     
-    for model in selected_models:
+    for model, file_path in targets:
         print("\n" + "-" * 70)
         print(f"모델 분석 진행 중: {model}")
         print("-" * 70)
         
-        file_path = os.path.join(data_dir, f"{model}.parquet")
         output_dir = os.path.join(eda_dir, model)
         
         if not os.path.exists(file_path):
