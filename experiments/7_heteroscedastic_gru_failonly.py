@@ -142,19 +142,37 @@ def main():
     criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0).to(device)
 
     # Use distinct learning rates for stability
+    warmup_epochs = 30
+    
+    # Phase 1: Sigma fixed
+    for param in model.logvar_head.parameters():
+        param.requires_grad = False
+        
     optimizer = optim.Adam([
         {'params': model.gru.parameters(), 'lr': 1e-3},
         {'params': model.shared.parameters(), 'lr': 1e-3},
-        {'params': model.mu_head.parameters(), 'lr': 1e-3},
-        {'params': model.logvar_head.parameters(), 'lr': 1e-4}
+        {'params': model.mu_head.parameters(), 'lr': 1e-3}
     ])
 
     epochs = 1000
     history = []
     n_train = len(X_train)
+    is_warmup = True
 
     print("Training Heteroscedastic GRU model with area-based survival loss (Fail Only)...")
     for epoch in range(epochs):
+        if epoch == warmup_epochs:
+            print("\n>>> Warm-up finished. Switching to joint training of mean and sigma. <<<")
+            is_warmup = False
+            for param in model.logvar_head.parameters():
+                param.requires_grad = True
+            optimizer = optim.Adam([
+                {'params': model.gru.parameters(), 'lr': 1e-3},
+                {'params': model.shared.parameters(), 'lr': 1e-3},
+                {'params': model.mu_head.parameters(), 'lr': 1e-3},
+                {'params': model.logvar_head.parameters(), 'lr': 1e-4}
+            ])
+
         model.train()
         total_loss = torch.tensor(0.0, device=device)
         total_mse = torch.tensor(0.0, device=device)
@@ -174,7 +192,9 @@ def main():
         indices = torch.randperm(n_train)
         num_batches = math.ceil(n_train / batch_size)
 
-        train_pbar = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{epochs} [Train]", leave=False)
+        # Use tqdm for progress bar
+        desc_str = f"Epoch {epoch+1}/{epochs} (Warmup)" if is_warmup else f"Epoch {epoch+1}/{epochs} (Joint)"
+        train_pbar = tqdm(range(num_batches), desc=desc_str, leave=False)
         for i in train_pbar:
             batch_idx = indices[i * batch_size:(i + 1) * batch_size]
             batch_x = X_train[batch_idx].to(device, non_blocking=True)
@@ -255,7 +275,8 @@ def main():
         else:
             v_mse = v_rmse = v_mae = v_r2 = 0.0
 
-        print(f"Epoch {epoch+1}/{epochs}")
+        phase_str = "[Warm-up]" if is_warmup else "[Joint]"
+        print(f"Epoch {epoch+1}/{epochs} {phase_str}")
         print(f"  Train -> Loss: {tl / n_train:.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {vl / len(X_val):.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
 
@@ -279,6 +300,7 @@ def main():
         # Record metrics for CSV logging in real-time
         epoch_data = {
             'epoch': epoch + 1,
+            'warmup': 1 if is_warmup else 0,
             'train_loss': tl / n_train,
             'train_mse': t_mse,
             'train_rmse': t_rmse,
