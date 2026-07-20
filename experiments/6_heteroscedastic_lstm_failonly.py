@@ -23,19 +23,19 @@ class HeteroscedasticRightCensoredLoss(nn.Module):
         u_mask = (censored == 0)
         c_mask = (censored == 1)
 
-        # Smoothly bound minimum log_var to -1.0 using softplus.
-        log_var_bound = -1.0 + F.softplus(log_var)
+        # Fix log_var to 0.0 (variance to 1.0) during warmup to stabilize optimization.
+        if is_warmup:
+            log_var_bound = torch.zeros_like(log_var)
+        else:
+            log_var_bound = -1.0 + F.softplus(log_var)
 
         # We clamp ONLY for the exp() to prevent float32 overflow (inf).
         # We MUST NOT clamp the penalty term `0.5 * log_var_bound` so gradients always flow!
         var_for_div = torch.exp(torch.clamp(log_var_bound, max=80.0))
         sigma_for_cdf = torch.sqrt(var_for_div) + 1e-6
 
-        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian (or pure MSE in warmup)
-        if is_warmup:
-            loss_uncensored = 0.5 * ((labels - mu) ** 2)
-        else:
-            loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
+        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian
+        loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
 
         # 2. Censored Loss: Penalize the "Area" estimated below the minimum known RUL
         # CDF of Normal distribution
@@ -155,7 +155,7 @@ def main():
     criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05).to(device)
 
     # Use distinct learning rates for stability
-    warmup_epochs = 30
+    warmup_epochs = 10
     
     # Phase 1: Sigma fixed
     for param in model.logvar_head.parameters():
