@@ -67,12 +67,14 @@ class HeteroscedasticRightCensoredLoss(nn.Module):
         return loss, loss_censored, loss_uncensored
 
 class HeteroscedasticGRU(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, num_layers=2):
+    def __init__(self, input_dim, hidden_dim=64, num_layers=2, dropout=0.2):
         super(HeteroscedasticGRU, self).__init__()
-        self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True)
+        # dropout applies between GRU layers (requires num_layers >= 2)
+        self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
         self.shared = nn.Sequential(
             nn.Linear(hidden_dim, 32),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Dropout(dropout)  # FC dropout for regularization
         )
         self.mu_head = nn.Linear(32, 1)
         self.logvar_head = nn.Linear(32, 1)
@@ -85,7 +87,7 @@ class HeteroscedasticGRU(nn.Module):
         log_var = self.logvar_head(shared_out)
         return mu, log_var, shared_out
 
-def eval_pass(model, criterion, X, y, c, batch_size, device):
+def eval_pass(model, criterion, X, y, c, batch_size, device, is_warmup=False):
     """Run evaluation pass using CPU memory with fast non-blocking transfer to GPU."""
     model.eval()
     val_loss = torch.tensor(0.0, device=device)
@@ -103,8 +105,11 @@ def eval_pass(model, criterion, X, y, c, batch_size, device):
             bc = c[i * batch_size:(i + 1) * batch_size].to(device, non_blocking=True)
 
             mu, log_var, _ = model(bx)
-            loss, _, _ = criterion(mu, log_var, by, bc, is_warmup=False)
-            val_log_vars.append(log_var.detach())
+            loss, _, _ = criterion(mu, log_var, by, bc, is_warmup=is_warmup)
+            if is_warmup:
+                val_log_vars.append(torch.zeros_like(log_var))
+            else:
+                val_log_vars.append(log_var.detach())
 
             pf = mu.view(-1)
             yf = by.view(-1)
@@ -157,15 +162,15 @@ def main():
     # Use distinct learning rates for stability
     warmup_epochs = 10
     
-    # Phase 1: Sigma fixed
+    # Phase 1: Sigma fixed (logvar_head frozen)
     for param in model.logvar_head.parameters():
         param.requires_grad = False
-        
+
     optimizer = optim.Adam([
         {'params': model.gru.parameters(), 'lr': 1e-3},
         {'params': model.shared.parameters(), 'lr': 1e-3},
         {'params': model.mu_head.parameters(), 'lr': 1e-3}
-    ])
+    ], weight_decay=1e-5)
 
     epochs = 1000
     history = []
@@ -184,7 +189,7 @@ def main():
                 {'params': model.shared.parameters(), 'lr': 1e-3},
                 {'params': model.mu_head.parameters(), 'lr': 1e-3},
                 {'params': model.logvar_head.parameters(), 'lr': 1e-4}
-            ])
+            ], weight_decay=1e-5)
 
         model.train()
         total_loss = torch.tensor(0.0, device=device)
@@ -255,7 +260,7 @@ def main():
                 total_uncensored += torch.sum(uf)
 
         val_loss, val_mse, val_mae, val_y_sum, val_y_sq_sum, val_uncensored, val_log_vars = eval_pass(
-            model, criterion, X_val, y_val, c_val, batch_size, device
+            model, criterion, X_val, y_val, c_val, batch_size, device, is_warmup=is_warmup
         )
 
         t_stats = torch.stack([
@@ -307,7 +312,8 @@ def main():
         val_logvar_std = all_val_log_vars.std().item()
         val_logvar_min = all_val_log_vars.min().item()
         val_logvar_max = all_val_log_vars.max().item()
-        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
+        logvar_note = " [loss uses fixed var=1.0]" if is_warmup else ""
+        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}{logvar_note}")
         print("-" * 80)
 
         # Record metrics for CSV logging in real-time
