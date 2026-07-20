@@ -1,0 +1,231 @@
+﻿import lightgbm as lgb
+import numpy as np
+from data_loader import get_data
+import scipy.special as special
+
+def custom_aft_objective(preds, train_data):
+    labels = train_data.get_label()
+    censored = train_data.get_weight()
+    
+    n_samples = len(labels)
+    # Reshape from (n_samples * 2,) to (n_samples, 2)
+    preds = preds.reshape(n_samples, 2, order='F')
+    
+    mu = preds[:, 0]
+    log_var = preds[:, 1]
+    
+    # Smoothly bound/clip log_var to prevent overflow/underflow in exp()
+    log_var_bound = np.clip(log_var, -5.0, 15.0)
+    var_for_div = np.exp(log_var_bound)
+    sigma = np.sqrt(var_for_div) + 1e-6
+    
+    z = (labels - mu) / sigma
+    
+    # Uncensored (c == 0)
+    grad_mu_uncensored = -z / sigma
+    hess_mu_uncensored = 1.0 / var_for_div
+    grad_w_uncensored = 0.5 * (1.0 - z**2)
+    hess_w_uncensored = 0.5 * (z**2)
+    
+    # Only calculate censored values if censored data exists
+    if np.any(censored == 1):
+        # Safe z for large z approximation to avoid division by zero
+        safe_z_large = np.where(z > 5, z, 5.0)
+        h_z_large = safe_z_large + 1.0 / safe_z_large
+        
+        # Safe survival for standard calculation using fast math
+        pdf = np.exp(-0.5 * z**2) / np.sqrt(2 * np.pi)
+        surv = np.clip(1.0 - special.ndtr(z), 1e-15, 1.0)
+        h_z_small = pdf / surv
+        
+        h_z = np.where(z > 5, h_z_large, h_z_small)
+        
+        grad_mu_censored = -h_z / sigma
+        # Ensure Hessian is strictly positive to prevent LightGBM leaf explosion
+        hess_mu_censored = np.maximum(h_z * (h_z - z) / var_for_div, 1e-4)
+        
+        grad_w_censored = -0.5 * z * h_z
+        hess_w_censored = np.maximum(0.25 * z * h_z * (1.0 + z * (h_z - z)), 1e-4)
+        
+        grad_mu = np.where(censored == 1, grad_mu_censored, grad_mu_uncensored)
+        hess_mu = np.where(censored == 1, hess_mu_censored, hess_mu_uncensored)
+        
+        grad_w = np.where(censored == 1, grad_w_censored, grad_w_uncensored)
+        hess_w = np.where(censored == 1, hess_w_censored, hess_w_uncensored)
+    else:
+        grad_mu = grad_mu_uncensored
+        hess_mu = hess_mu_uncensored
+        grad_w = grad_w_uncensored
+        hess_w = hess_w_uncensored
+        
+    grad = np.stack([grad_mu, grad_w], axis=1)
+    hess = np.stack([hess_mu, hess_w], axis=1)
+    
+    return grad.ravel(order='F'), hess.ravel(order='F')
+
+def aft_eval(preds, train_data):
+    labels = train_data.get_label()
+    censored = train_data.get_weight()
+    
+    n_samples = len(labels)
+    preds = preds.reshape(n_samples, 2, order='F')
+    
+    mu = preds[:, 0]
+    log_var = preds[:, 1]
+    
+    log_var_bound = np.clip(log_var, -5.0, 15.0)
+    var_for_div = np.exp(log_var_bound)
+    sigma = np.sqrt(var_for_div) + 1e-6
+    z = (labels - mu) / sigma
+    
+    loss_uncensored = 0.5 * log_var_bound + 0.5 * (z ** 2) + 0.5 * np.log(2*np.pi)
+    
+    if np.any(censored == 1):
+        # Safe z for large z approx
+        safe_z_large = np.where(z > 5, z, 5.0)
+        loss_large = 0.5 * (safe_z_large**2) + 0.5*np.log(2*np.pi) + np.log(safe_z_large)
+        
+        # Safe survival for small z using fast math
+        cdf = special.ndtr(z)
+        surv = np.clip(1.0 - cdf, 1e-15, 1.0)
+        loss_small = -np.log(surv)
+        
+        loss_censored = np.where(z > 5, loss_large, loss_small)
+        loss = np.where(censored == 1, loss_censored, loss_uncensored)
+    else:
+        loss = loss_uncensored
+    
+    # Calculate RUL metrics for uncensored samples
+    preds_clipped = np.clip(mu, -20, 15)
+    preds_orig = np.expm1(preds_clipped)
+    labels_orig = np.expm1(labels)
+    
+    uncensored_mask = (censored == 0)
+    if np.any(uncensored_mask):
+        diff_u = preds_orig[uncensored_mask] - labels_orig[uncensored_mask]
+        mse = np.mean(diff_u ** 2)
+        rmse = np.sqrt(mse)
+        mae = np.mean(np.abs(diff_u))
+        
+        y_u = labels_orig[uncensored_mask]
+        ss_res = np.sum(diff_u ** 2)
+        ss_tot = np.sum((y_u - np.mean(y_u)) ** 2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+    else:
+        mse, rmse, mae, r2 = 0.0, 0.0, 0.0, 0.0
+        
+    return [
+        ('aft_loss', np.mean(loss), False),
+        ('mse', mse, False),
+        ('rmse', rmse, False),
+        ('mae', mae, False),
+        ('r2', r2, True)
+    ]
+
+def custom_log_evaluation(period=10):
+    def callback(env):
+        if period > 0 and (env.iteration + 1) % period == 0:
+            results = {}
+            for dataset_name, metric_name, value, is_higher_better in env.evaluation_result_list:
+                if dataset_name not in results:
+                    results[dataset_name] = []
+                results[dataset_name].append((metric_name, value))
+            
+            print(f"Iteration {env.iteration + 1}")
+            for dataset_name, metrics in results.items():
+                name_map = {'training': 'Train', 'valid_1': 'Val'}
+                disp_name = name_map.get(dataset_name, dataset_name)
+                
+                metric_strs = []
+                for m_name, val in metrics:
+                    disp_m_name = 'Loss' if m_name == 'aft_loss' else m_name.upper()
+                    metric_strs.append(f"{disp_m_name}: {val:.4f}")
+                print(f"  {disp_name:5s} -> " + " | ".join(metric_strs))
+    return callback
+
+def main():
+    train_df, val_df, features = get_data()
+    
+    # Convert RUL to Log scale for AFT model
+    train_df['log_RUL'] = np.log1p(train_df['RUL'])
+    val_df['log_RUL'] = np.log1p(val_df['RUL'])
+    
+    print(f"Train shapes: features {train_df[features].shape}, target {train_df['log_RUL'].shape}")
+    
+    # LightGBM dataset
+    # We pass 'censored' as weights so we can access it inside the custom objective
+    train_data = lgb.Dataset(
+        train_df[features], 
+        label=train_df['log_RUL'], 
+        weight=train_df['censored']
+    )
+    # Sample 500k rows for fast validation during training
+    np.random.seed(42)
+    val_sample_idx = np.random.choice(len(val_df), size=min(500000, len(val_df)), replace=False)
+    val_sample_df = val_df.iloc[val_sample_idx]
+    
+    val_data = lgb.Dataset(
+        val_sample_df[features], 
+        label=val_sample_df['log_RUL'], 
+        weight=val_sample_df['censored'],
+        reference=train_data
+    )
+    
+    params = {
+        'learning_rate': 0.02,
+        'num_leaves': 31,
+        'verbose': 1,
+        'objective': custom_aft_objective,
+        'num_class': 2
+    }
+    
+    print("Training LightGBM Heteroscedastic Log-Normal AFT model...")
+    gbm = lgb.train(
+        params,
+        train_data,
+        num_boost_round=350,
+        valid_sets=[train_data, val_data],
+        feval=aft_eval,
+        callbacks=[
+            custom_log_evaluation(period=10)
+        ]
+    )
+    
+    print("Training finished.")
+    
+    # Final evaluation on the full test set
+    print("Evaluating on full test set...")
+    preds = gbm.predict(val_df[features])
+    if len(preds.shape) == 1 or preds.ndim == 1:
+        preds = preds.reshape(len(val_df), 2, order='F')
+        
+    mu = preds[:, 0]
+    log_var = preds[:, 1]
+    
+    labels = val_df['log_RUL'].values
+    censored = val_df['censored'].values
+    
+    # Calculate final metrics
+    preds_clipped = np.clip(mu, -20, 15)
+    preds_orig = np.expm1(preds_clipped)
+    labels_orig = np.expm1(labels)
+    
+    uncensored_mask = (censored == 0)
+    if np.any(uncensored_mask):
+        diff_u = preds_orig[uncensored_mask] - labels_orig[uncensored_mask]
+        mse = np.mean(diff_u ** 2)
+        rmse = np.sqrt(mse)
+        mae = np.mean(np.abs(diff_u))
+        
+        y_u = labels_orig[uncensored_mask]
+        ss_res = np.sum(diff_u ** 2)
+        ss_tot = np.sum((y_u - np.mean(y_u)) ** 2)
+        r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
+    else:
+        mse, rmse, mae, r2 = 0.0, 0.0, 0.0, 0.0
+        
+    print(f"Final Test Metrics -> MSE: {mse:.4f} | RMSE: {rmse:.4f} | MAE: {mae:.4f} | R2: {r2:.4f}")
+    print(f"Predicted log_var stats -> Mean: {np.mean(log_var):.4f} | Std: {np.std(log_var):.4f} | Min: {np.min(log_var):.4f} | Max: {np.max(log_var):.4f}")
+
+if __name__ == "__main__":
+    main()
