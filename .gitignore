@@ -1,0 +1,32 @@
+# Git Ignore File for 26_2_COIN Project
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Python cache and temporary files
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints/
+.pytest_cache/
+
+# Large Datasets (Ignore all parquet files)
+*.parquet
+data/**/*.parquet
+data/model=*/**/*.parquet
+
+# Local User Configurations / Editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# OS temporary files
+.DS_Store
+Thumbs.db
