@@ -1,37 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from data_loader import get_data
+from data_loader import get_data, build_sequences
 import math
 import numpy as np
 from tqdm import tqdm
 import torch.nn.functional as F
-
-def build_sequences(df, features, window_size):
-    """Build sequence tensors on CPU."""
-    X_list, y_list, c_list = [], [], []
-    for _, group in df.groupby('serial_number'):
-        n = len(group)
-        if n < window_size:
-            continue
-        group_x = group[features].values
-        group_y = group['RUL'].values
-        group_c = group['censored'].values
-
-        x_seqs = np.lib.stride_tricks.sliding_window_view(
-            group_x, (window_size, group_x.shape[1])
-        ).squeeze(axis=1)
-        y_seqs = np.log1p(group_y[window_size - 1:])
-        c_seqs = group_c[window_size - 1:]
-
-        X_list.append(x_seqs)
-        y_list.append(y_seqs)
-        c_list.append(c_seqs)
-
-    X = torch.tensor(np.concatenate(X_list, axis=0), dtype=torch.float32)
-    y = torch.tensor(np.concatenate(y_list, axis=0), dtype=torch.float32)
-    c = torch.tensor(np.concatenate(c_list, axis=0), dtype=torch.float32)
-    return X, y, c
 
 class HeteroscedasticRightCensoredLoss(nn.Module):
     def __init__(self, failure_weight=8.0):
@@ -154,10 +128,18 @@ def main():
     del train_df, val_df
     gc.collect()
 
-    print("Datasets prepared on CPU.")
+    # Pin memory for faster CPU-to-GPU data transfer
+    X_train = X_train.pin_memory()
+    y_train = y_train.pin_memory()
+    c_train = c_train.pin_memory()
+    X_val = X_val.pin_memory()
+    y_val = y_val.pin_memory()
+    c_val = c_val.pin_memory()
+
+    print("Datasets prepared and pinned on CPU.")
 
     model = HeteroscedasticGRU(input_dim=len(features)).to(device)
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0).to(device)
 
     # Use distinct learning rates for stability
     optimizer = optim.Adam([

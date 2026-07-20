@@ -118,3 +118,54 @@ def get_lgbm_callback(model_name):
             row[f"{prefix}_{disp_name}"] = value
         log_epoch_to_csv(model_name, row)
     return callback
+
+
+def build_sequences(df, features, window_size):
+    """
+    Build sequence tensors on CPU with highly optimized vectorization.
+    Replaces 30,000+ pandas groupby iterations with numpy operations.
+    """
+    import torch
+    import numpy as np
+    
+    # Ensure DataFrame is sorted by serial_number and date to keep time-series order
+    # Fill in date sorting only if it exists in the columns
+    sort_cols = ['serial_number']
+    if 'date' in df.columns:
+        sort_cols.append('date')
+    df_sorted = df.sort_values(sort_cols)
+    
+    serials = df_sorted['serial_number'].values
+    x_data = df_sorted[features].values
+    y_data = df_sorted['RUL'].values
+    c_data = df_sorted['censored'].values
+    
+    n = len(df_sorted)
+    if n < window_size:
+        return torch.empty((0, window_size, len(features)), dtype=torch.float32), \
+               torch.empty((0,), dtype=torch.float32), \
+               torch.empty((0,), dtype=torch.float32)
+    
+    # 1. sliding_window_view for features: (n - window_size + 1, window_size, n_features)
+    x_view = np.lib.stride_tricks.sliding_window_view(
+        x_data, (window_size, x_data.shape[1])
+    ).squeeze(axis=1)
+    
+    # 2. Get target and censored values corresponding to the end of each window
+    y_view = y_data[window_size - 1:]
+    c_view = c_data[window_size - 1:]
+    
+    # 3. Valid windows must not cross serial_number boundaries.
+    # A window starting at i and ending at i+window_size-1 is valid iff
+    # serials[i] == serials[i+window_size-1].
+    valid_mask = (serials[:-window_size + 1] == serials[window_size - 1:])
+    
+    X_valid = x_view[valid_mask]
+    y_valid = np.log1p(y_view[valid_mask])
+    c_valid = c_view[valid_mask]
+    
+    X = torch.tensor(X_valid, dtype=torch.float32)
+    y = torch.tensor(y_valid, dtype=torch.float32)
+    c = torch.tensor(c_valid, dtype=torch.float32)
+    
+    return X, y, c

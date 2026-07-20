@@ -98,12 +98,20 @@ def main():
     del train_df, val_df
     gc.collect()
     
+    # Pin memory for faster CPU-to-GPU data transfer
+    X_train = X_train.pin_memory()
+    y_train = y_train.pin_memory()
+    c_train = c_train.pin_memory()
+    X_val = X_val.pin_memory()
+    y_val = y_val.pin_memory()
+    c_val = c_val.pin_memory()
+    
     # Extremely large batch size to maximize GPU usage for this tiny model
     batch_size = 262144
 
     model = HeteroscedasticMLP(input_dim=len(features)).to(device)
     # Adjustable failure weight for experimentation
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0).to(device)
     
     # Use distinct learning rates: slower learning rate for variance head to prevent explosion
     optimizer = optim.Adam([
