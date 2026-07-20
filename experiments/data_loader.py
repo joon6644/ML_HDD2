@@ -15,8 +15,11 @@ def get_data(splitted_dir: str = SPLITTED_DIR):
     미리 분할되어 저장된 train.parquet, val.parquet 데이터를 로드하고 
     StandardScaler 정규화 및 Clamping을 거쳐 반환합니다.
     """
-    train_path = os.path.join(splitted_dir, "train.parquet")
-    val_path = os.path.join(splitted_dir, "val.parquet")
+    # 디렉토리 이름에서 모델명 추출 (예: ST12000NM0007)
+    model_name = os.path.basename(splitted_dir.rstrip(r"\/"))
+    
+    train_path = os.path.join(splitted_dir, f"{model_name}_train.parquet")
+    val_path = os.path.join(splitted_dir, f"{model_name}_val.parquet")
     
     print(f"Loading pre-splitted train dataset: {train_path}...")
     train_df = pd.read_parquet(train_path)

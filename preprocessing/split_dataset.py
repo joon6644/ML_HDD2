@@ -63,11 +63,15 @@ def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, v
     # 결과 폴더 생성
     os.makedirs(output_dir, exist_ok=True)
     
+    # 입력 파일명에서 모델명 추출 (예: ST12000NM0007_preprocessed.parquet -> ST12000NM0007)
+    base_name = os.path.basename(input_path)
+    model_name = base_name.replace("_preprocessed.parquet", "").replace(".parquet", "")
+    
     # parquet 파일로 저장
     print(f"Saving splits to {output_dir}...")
-    train_path = os.path.join(output_dir, "train.parquet")
-    val_path = os.path.join(output_dir, "val.parquet")
-    test_path = os.path.join(output_dir, "test.parquet")
+    train_path = os.path.join(output_dir, f"{model_name}_train.parquet")
+    val_path = os.path.join(output_dir, f"{model_name}_val.parquet")
+    test_path = os.path.join(output_dir, f"{model_name}_test.parquet")
     
     train_df.to_parquet(train_path, index=False)
     val_df.to_parquet(val_path, index=False)
