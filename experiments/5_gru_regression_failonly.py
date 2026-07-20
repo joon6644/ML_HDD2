@@ -145,6 +145,7 @@ def main():
     ])
 
     epochs = 1000
+    history = []
     n_train = len(X_train)
 
     print("Training GRU model with custom right-censored loss...")
@@ -231,7 +232,24 @@ def main():
         print(f"  Train -> Loss: {tl / n_train:.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {vl / len(X_val):.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
 
+        # Record metrics for CSV logging
+        history.append({
+            'epoch': epoch + 1,
+            'train_loss': tl / n_train,
+            'train_mse': t_mse,
+            'train_rmse': t_rmse,
+            'train_mae': t_mae,
+            'train_r2': t_r2,
+            'val_loss': vl / len(X_val),
+            'val_mse': v_mse,
+            'val_rmse': v_rmse,
+            'val_mae': v_mae,
+            'val_r2': v_r2
+        })
+
     print("Training finished.")
+    from data_loader import save_epoch_results
+    save_epoch_results("5_gru_regression_failonly", history)
 
 if __name__ == "__main__":
     main()

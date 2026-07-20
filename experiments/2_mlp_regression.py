@@ -86,6 +86,7 @@ def main():
     ])
     
     epochs = 300
+    history = []
     
     print("Training MLP model with custom right-censored loss...")
     for epoch in range(epochs):
@@ -198,7 +199,24 @@ def main():
         print(f"  Train -> Loss: {(total_loss / len(X_train)).item():.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {(val_loss / len(X_val)).item():.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
         
+        # Record metrics for CSV logging
+        history.append({
+            'epoch': epoch + 1,
+            'train_loss': (total_loss / len(X_train)).item(),
+            'train_mse': t_mse,
+            'train_rmse': t_rmse,
+            'train_mae': t_mae,
+            'train_r2': t_r2,
+            'val_loss': (val_loss / len(X_val)).item(),
+            'val_mse': v_mse,
+            'val_rmse': v_rmse,
+            'val_mae': v_mae,
+            'val_r2': v_r2
+        })
+        
     print("Training finished.")
+    from data_loader import save_epoch_results
+    save_epoch_results("2_mlp_regression", history)
 
 if __name__ == "__main__":
     main()

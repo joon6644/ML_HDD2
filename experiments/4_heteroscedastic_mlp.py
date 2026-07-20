@@ -110,6 +110,7 @@ def main():
     ])
     
     epochs = 1000
+    history = []
     
     print("Training Heteroscedastic MLP model with area-based survival loss...")
     for epoch in range(epochs):
@@ -276,10 +277,37 @@ def main():
         print(f"  [Diagnostics] Censored Loss Mean:   {lc_mean:.4f} | Count: {epoch_lc_count.item():.0f} | mu mean: {mu_c_mean:.4f}")
         
         all_val_log_vars = torch.cat(val_log_vars)
-        print(f"  [Diagnostics] log_var (Val) -> mean: {all_val_log_vars.mean().item():.4f} | std: {all_val_log_vars.std().item():.4f} | min: {all_val_log_vars.min().item():.4f} | max: {all_val_log_vars.max().item():.4f}")
+        val_logvar_mean = all_val_log_vars.mean().item()
+        val_logvar_std = all_val_log_vars.std().item()
+        val_logvar_min = all_val_log_vars.min().item()
+        val_logvar_max = all_val_log_vars.max().item()
+        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
         print("-" * 80)
 
+        # Record metrics for CSV logging
+        history.append({
+            'epoch': epoch + 1,
+            'train_loss': (total_loss / len(X_train)).item(),
+            'train_mse': t_mse,
+            'train_rmse': t_rmse,
+            'train_mae': t_mae,
+            'train_r2': t_r2,
+            'val_loss': (val_loss / len(X_val)).item(),
+            'val_mse': v_mse,
+            'val_rmse': v_rmse,
+            'val_mae': v_mae,
+            'val_r2': v_r2,
+            'diag_uncensored_loss_mean': lu_mean,
+            'diag_censored_loss_mean': lc_mean,
+            'diag_val_logvar_mean': val_logvar_mean,
+            'diag_val_logvar_std': val_logvar_std,
+            'diag_val_logvar_min': val_logvar_min,
+            'diag_val_logvar_max': val_logvar_max
+        })
+
     print("Training finished.")
+    from data_loader import save_epoch_results
+    save_epoch_results("4_heteroscedastic_mlp", history)
 
 if __name__ == "__main__":
     main()

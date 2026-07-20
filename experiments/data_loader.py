@@ -61,3 +61,20 @@ def get_data(splitted_dir: str = SPLITTED_DIR):
     _print_summary("Val", val_df)
     
     return train_df, val_df, features
+
+
+def save_epoch_results(model_name, history_list):
+    """
+    Saves a list of dictionaries (history_list) as a CSV file in the results/ folder.
+    """
+    results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{model_name}.csv")
+    
+    df = pd.DataFrame(history_list)
+    # Reorder columns to put 'epoch' first if present
+    if 'epoch' in df.columns:
+        cols = ['epoch'] + [c for c in df.columns if c != 'epoch']
+        df = df[cols]
+    df.to_csv(csv_path, index=False)
+    print(f"Saved epoch results to {csv_path}")

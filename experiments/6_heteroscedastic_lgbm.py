@@ -185,6 +185,7 @@ def main():
     }
     
     print("Training LightGBM Heteroscedastic Log-Normal AFT model...")
+    evals_result = {}
     gbm = lgb.train(
         params,
         train_data,
@@ -193,10 +194,27 @@ def main():
         feval=aft_eval,
         callbacks=[
             custom_log_evaluation(period=10)
-        ]
+        ],
+        evals_result=evals_result
     )
     
     print("Training finished.")
+    
+    # Process evals_result to format matching standard PyTorch logs
+    history = []
+    num_rounds = len(evals_result['training']['aft_loss'])
+    for r in range(num_rounds):
+        row = {'epoch': r + 1}
+        for dataset_name, metrics in evals_result.items():
+            name_map = {'training': 'train', 'valid_1': 'val'}
+            prefix = name_map.get(dataset_name, dataset_name)
+            for metric_name, values in metrics.items():
+                disp_name = 'loss' if metric_name == 'aft_loss' else metric_name
+                row[f"{prefix}_{disp_name}"] = values[r]
+        history.append(row)
+        
+    from data_loader import save_epoch_results
+    save_epoch_results("6_heteroscedastic_lgbm", history)
     
     # Final evaluation on the full test set
     print("Evaluating on full test set...")
