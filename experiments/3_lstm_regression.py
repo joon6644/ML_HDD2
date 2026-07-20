@@ -1,4 +1,4 @@
-﻿import torch
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from data_loader import get_data
@@ -127,6 +127,11 @@ def main():
     print(f"Train sequences: {len(X_train)}")
     X_val, y_val, c_val = build_sequences(val_df, features, window_size)
     print(f"Test sequences: {len(X_val)}")
+
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    import gc
+    del train_df, val_df
+    gc.collect()
 
     # Keep entire datasets on CPU memory to avoid VRAM paging limits
     print("Datasets prepared on CPU.")

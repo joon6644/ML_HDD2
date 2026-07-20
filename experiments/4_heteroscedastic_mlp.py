@@ -1,4 +1,4 @@
-﻿import torch
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
@@ -78,18 +78,25 @@ def main():
     train_df['log_RUL'] = np.log1p(train_df['RUL'])
     val_df['log_RUL'] = np.log1p(val_df['RUL'])
     
-    # Convert to tensors and move directly to GPU memory (dataset is small enough)
-    X_train = torch.tensor(train_df[features].values, dtype=torch.float32, device=device)
-    y_train = torch.tensor(train_df['log_RUL'].values, dtype=torch.float32, device=device)
-    c_train = torch.tensor(train_df['censored'].values, dtype=torch.float32, device=device)
+    import gc
+    # Convert to tensors on CPU memory to avoid VRAM exhaustion
+    X_train = torch.tensor(train_df[features].values, dtype=torch.float32, device='cpu')
+    y_train = torch.tensor(train_df['log_RUL'].values, dtype=torch.float32, device='cpu')
+    c_train = torch.tensor(train_df['censored'].values, dtype=torch.float32, device='cpu')
+    
+    X_val = torch.tensor(val_df[features].values, dtype=torch.float32, device='cpu')
+    y_val = torch.tensor(val_df['log_RUL'].values, dtype=torch.float32, device='cpu')
+    c_val = torch.tensor(val_df['censored'].values, dtype=torch.float32, device='cpu')
+
+    # 메모리 절약을 위해 metadata만 가볍게 복사해두고, 거대한 DataFrame들은 삭제
+    val_meta = val_df[['serial_number', 'date']].values.astype(str)
+    
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    del train_df, val_df
+    gc.collect()
     
     # Extremely large batch size to maximize GPU usage for this tiny model
     batch_size = 262144
-    
-    X_val = torch.tensor(val_df[features].values, dtype=torch.float32, device=device)
-    y_val = torch.tensor(val_df['log_RUL'].values, dtype=torch.float32, device=device)
-    c_val = torch.tensor(val_df['censored'].values, dtype=torch.float32, device=device)
-
 
     model = HeteroscedasticMLP(input_dim=len(features)).to(device)
     # Adjustable failure weight for experimentation
@@ -121,17 +128,17 @@ def main():
         epoch_lu_count = torch.tensor(0.0, device=device)
         epoch_mu_c_sum = torch.tensor(0.0, device=device)
         epoch_mu_u_sum = torch.tensor(0.0, device=device)
-        # Generate random indices for shuffling natively on GPU
-        indices = torch.randperm(len(X_train), device=device)
+        # Generate random indices natively on CPU
+        indices = torch.randperm(len(X_train), device='cpu')
         num_batches = math.ceil(len(X_train) / batch_size)
         
         # Use tqdm for progress bar
         train_pbar = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{epochs} [Train]", leave=False)
         for i in train_pbar:
             batch_idx = indices[i * batch_size : (i + 1) * batch_size]
-            batch_x = X_train[batch_idx]
-            batch_y = y_train[batch_idx]
-            batch_c = c_train[batch_idx]
+            batch_x = X_train[batch_idx].to(device, non_blocking=True)
+            batch_y = y_train[batch_idx].to(device, non_blocking=True)
+            batch_c = c_train[batch_idx].to(device, non_blocking=True)
             
             optimizer.zero_grad()
             mu, log_var, _ = model(batch_x)
@@ -186,9 +193,9 @@ def main():
         val_pbar = tqdm(range(num_val_batches), desc=f"Epoch {epoch+1}/{epochs} [Val]", leave=False)
         with torch.no_grad():
             for i in val_pbar:
-                batch_x = X_val[i * batch_size : (i + 1) * batch_size]
-                batch_y = y_val[i * batch_size : (i + 1) * batch_size]
-                batch_c = c_val[i * batch_size : (i + 1) * batch_size]
+                batch_x = X_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
+                batch_y = y_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
+                batch_c = c_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
                 
                 mu, log_var, shared_out = model(batch_x)
                 val_log_vars.append(log_var.detach())
@@ -199,10 +206,8 @@ def main():
                     idx_in_batch = torch.nonzero(extreme_mask, as_tuple=True)[0][0].item()
                     global_idx = i * batch_size + idx_in_batch
                     
-                    # Extract original row info
-                    row = val_df.iloc[global_idx]
-                    disk_id = row.get('disk_id', 'Unknown')
-                    date = row.get('date', 'Unknown')
+                    # Extract original metadata info from cached val_meta
+                    disk_id, date = val_meta[global_idx]
                     
                     x_outlier = batch_x[idx_in_batch]
                     

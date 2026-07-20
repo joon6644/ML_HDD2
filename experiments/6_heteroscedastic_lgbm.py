@@ -1,4 +1,4 @@
-﻿import lightgbm as lgb
+import lightgbm as lgb
 import numpy as np
 from data_loader import get_data
 import scipy.special as special
@@ -170,6 +170,11 @@ def main():
         weight=val_sample_df['censored'],
         reference=train_data
     )
+    
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    import gc
+    del train_df, val_sample_df
+    gc.collect()
     
     params = {
         'learning_rate': 0.02,

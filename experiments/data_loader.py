@@ -30,6 +30,12 @@ def get_data(splitted_dir: str = SPLITTED_DIR):
     # feature 컬럼 자동 식별
     features = [c for c in train_df.columns if c not in EXCLUDE_COLS]
     
+    # 메모리 절약을 위해 feature 컬럼들을 즉시 float32로 캐스팅
+    print("Casting features to float32 to reduce memory footprint...")
+    for col in features:
+        train_df[col] = train_df[col].astype('float32')
+        val_df[col] = val_df[col].astype('float32')
+    
     # 만약을 대비한 결측치 0 채움
     for split in [train_df, val_df]:
         split[features] = split[features].fillna(0)

@@ -1,4 +1,4 @@
-﻿import torch
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
@@ -60,16 +60,21 @@ def main():
     train_df['log_RUL'] = np.log1p(train_df['RUL'])
     val_df['log_RUL'] = np.log1p(val_df['RUL'])
     
-    # Convert to tensors and move directly to GPU memory
-    X_train = torch.tensor(train_df[features].values, dtype=torch.float32, device=device)
-    y_train = torch.tensor(train_df['log_RUL'].values, dtype=torch.float32, device=device)
-    c_train = torch.tensor(train_df['censored'].values, dtype=torch.float32, device=device)
+    import gc
+    # Convert to tensors on CPU memory to avoid VRAM exhaustion
+    X_train = torch.tensor(train_df[features].values, dtype=torch.float32, device='cpu')
+    y_train = torch.tensor(train_df['log_RUL'].values, dtype=torch.float32, device='cpu')
+    c_train = torch.tensor(train_df['censored'].values, dtype=torch.float32, device='cpu')
     
     batch_size = 262144
     
-    X_val = torch.tensor(val_df[features].values, dtype=torch.float32, device=device)
-    y_val = torch.tensor(val_df['log_RUL'].values, dtype=torch.float32, device=device)
-    c_val = torch.tensor(val_df['censored'].values, dtype=torch.float32, device=device)
+    X_val = torch.tensor(val_df[features].values, dtype=torch.float32, device='cpu')
+    y_val = torch.tensor(val_df['log_RUL'].values, dtype=torch.float32, device='cpu')
+    c_val = torch.tensor(val_df['censored'].values, dtype=torch.float32, device='cpu')
+    
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    del train_df, val_df
+    gc.collect()
     
     model = MLP(input_dim=len(features)).to(device)
     criterion = LogNormalAFTLoss(failure_weight=14.0).to(device)
@@ -91,15 +96,17 @@ def main():
         total_uncensored = torch.tensor(0.0, device=device)
         total_y_sum = torch.tensor(0.0, device=device)
         total_y_sq_sum = torch.tensor(0.0, device=device)
-        indices = torch.randperm(len(X_train), device=device)
+        
+        # Generate random indices natively on CPU
+        indices = torch.randperm(len(X_train), device='cpu')
         num_batches = math.ceil(len(X_train) / batch_size)
         
         train_pbar = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{epochs} [Train]", leave=False)
         for i in train_pbar:
             batch_idx = indices[i * batch_size : (i + 1) * batch_size]
-            batch_x = X_train[batch_idx]
-            batch_y = y_train[batch_idx]
-            batch_c = c_train[batch_idx]
+            batch_x = X_train[batch_idx].to(device, non_blocking=True)
+            batch_y = y_train[batch_idx].to(device, non_blocking=True)
+            batch_c = c_train[batch_idx].to(device, non_blocking=True)
             
             optimizer.zero_grad()
             preds = model(batch_x)
@@ -139,9 +146,9 @@ def main():
         val_pbar = tqdm(range(num_val_batches), desc=f"Epoch {epoch+1}/{epochs} [Val]", leave=False)
         with torch.no_grad():
             for i in val_pbar:
-                batch_x = X_val[i * batch_size : (i + 1) * batch_size]
-                batch_y = y_val[i * batch_size : (i + 1) * batch_size]
-                batch_c = c_val[i * batch_size : (i + 1) * batch_size]
+                batch_x = X_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
+                batch_y = y_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
+                batch_c = c_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
                 
                 preds = model(batch_x)
                 loss = criterion(preds, batch_y, batch_c)

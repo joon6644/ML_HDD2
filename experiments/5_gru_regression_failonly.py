@@ -1,4 +1,4 @@
-﻿import torch
+import torch
 import torch.nn as nn
 import torch.optim as optim
 from data_loader import get_data
@@ -128,6 +128,12 @@ def main():
     print(f"Train sequences: {len(X_train)}")
     X_val, y_val, c_val = build_sequences(val_df, features, window_size)
     print(f"Test sequences: {len(X_val)}")
+    
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    import gc
+    del train_df, val_df
+    gc.collect()
+
     print("Datasets prepared on CPU.")
 
     model = GRUReg(input_dim=len(features)).to(device)
