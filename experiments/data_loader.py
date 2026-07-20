@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import torch
 from sklearn.preprocessing import StandardScaler
 
 # ─── 정적 분할 데이터 경로 설정 ──────────────────────────────────────────────
