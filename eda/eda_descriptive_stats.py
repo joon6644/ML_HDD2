@@ -287,8 +287,6 @@ def main():
     
     subtitle_text = (
         f"• 분석 모델: {model}\n"
-        f"• 분석 대상: 결측비율 10% 미만의 SMART Raw 컬럼 총 {nrows}개 (모든 로우 데이터 반영)\n"
-        f"• 시각화 방식: 모든 데이터 반영 히스토그램 및 박스플롯 (이상치 마커는 속도 최적화를 위해 최대 1,000개 샘플링)\n"
         f"• 생성일시: {time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
     props = dict(boxstyle="round,pad=0.6", facecolor="#f8f9fa", edgecolor="#bdc3c7", alpha=0.9)
