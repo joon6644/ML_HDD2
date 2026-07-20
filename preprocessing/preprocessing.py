@@ -4,9 +4,9 @@ import argparse
 import time
 import duckdb
 
-# 동일 폴더 내의 core 모듈을 임포트하기 위해 sys.path 추가
+# 동일 폴더 내의 common 모듈을 임포트하기 위해 sys.path 추가
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from core import run_base_preprocessing
+from common import run_base_preprocessing
 
 def main():
     parser = argparse.ArgumentParser(description="ST12000NM0007 디스크 시계열 데이터 전처리 파이프라인")
