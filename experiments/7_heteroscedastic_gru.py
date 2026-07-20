@@ -8,15 +8,20 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 class HeteroscedasticRightCensoredLoss(nn.Module):
-    def __init__(self, failure_weight=8.0):
+    def __init__(self, failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05):
         super(HeteroscedasticRightCensoredLoss, self).__init__()
         self.failure_weight = failure_weight
+        self.survival_weight = survival_weight
+        self.warmup_survival_weight = warmup_survival_weight
 
-    def forward(self, mu, log_var, labels, censored):
+    def forward(self, mu, log_var, labels, censored, is_warmup=False):
         mu = mu.view(-1)
         log_var = log_var.view(-1)
         labels = labels.view(-1)
         censored = censored.view(-1)
+
+        u_mask = (censored == 0)
+        c_mask = (censored == 1)
 
         # Smoothly bound minimum log_var to -1.0 using softplus.
         log_var_bound = -1.0 + F.softplus(log_var)
@@ -26,9 +31,11 @@ class HeteroscedasticRightCensoredLoss(nn.Module):
         var_for_div = torch.exp(torch.clamp(log_var_bound, max=80.0))
         sigma_for_cdf = torch.sqrt(var_for_div) + 1e-6
 
-        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian
-        # 0.5 * log(var) + 0.5 * (y - mu)^2 / var
-        loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
+        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian (or pure MSE in warmup)
+        if is_warmup:
+            loss_uncensored = 0.5 * ((labels - mu) ** 2)
+        else:
+            loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
 
         # 2. Censored Loss: Penalize the "Area" estimated below the minimum known RUL
         # CDF of Normal distribution
@@ -40,10 +47,24 @@ class HeteroscedasticRightCensoredLoss(nn.Module):
         # Penalty (Negative Log Likelihood of survival)
         loss_censored = -torch.log(surv_prob)
 
-        # Weighting uncensored loss to balance the dataset distribution.
-        loss = torch.where(censored == 1, loss_censored, loss_uncensored * self.failure_weight)
+        # Calculate class-wise means safely
+        if u_mask.sum() > 0:
+            mean_loss_unc = loss_uncensored[u_mask].mean()
+        else:
+            mean_loss_unc = torch.tensor(0.0, device=mu.device)
 
-        return loss.mean(), loss_censored, loss_uncensored
+        if c_mask.sum() > 0:
+            mean_loss_cen = loss_censored[c_mask].mean()
+        else:
+            mean_loss_cen = torch.tensor(0.0, device=mu.device)
+
+        # Weighted combination based on training phase
+        if is_warmup:
+            loss = self.failure_weight * mean_loss_unc + self.warmup_survival_weight * mean_loss_cen
+        else:
+            loss = self.failure_weight * mean_loss_unc + self.survival_weight * mean_loss_cen
+
+        return loss, loss_censored, loss_uncensored
 
 class HeteroscedasticGRU(nn.Module):
     def __init__(self, input_dim, hidden_dim=64, num_layers=2):
@@ -82,7 +103,7 @@ def eval_pass(model, criterion, X, y, c, batch_size, device):
             bc = c[i * batch_size:(i + 1) * batch_size].to(device, non_blocking=True)
 
             mu, log_var, _ = model(bx)
-            loss, _, _ = criterion(mu, log_var, by, bc)
+            loss, _, _ = criterion(mu, log_var, by, bc, is_warmup=False)
             val_log_vars.append(log_var.detach())
 
             pf = mu.view(-1)
@@ -128,7 +149,7 @@ def main():
     # Pin memory logic removed to prevent host OOM crash with large sequence data
 
     model = HeteroscedasticGRU(input_dim=len(features)).to(device)
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0).to(device)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05).to(device)
 
     # Use distinct learning rates for stability
     warmup_epochs = 30
@@ -192,7 +213,7 @@ def main():
 
             optimizer.zero_grad()
             mu, log_var, _ = model(batch_x)
-            loss, lc, lu = criterion(mu, log_var, batch_y, batch_c)
+            loss, lc, lu = criterion(mu, log_var, batch_y, batch_c, is_warmup=is_warmup)
             loss.backward()
             optimizer.step()
 

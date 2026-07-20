@@ -10,46 +10,63 @@ from tqdm import tqdm
 import torch.nn.functional as F
 
 class HeteroscedasticRightCensoredLoss(nn.Module):
-    def __init__(self, failure_weight=8.0):
+    def __init__(self, failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05):
         super(HeteroscedasticRightCensoredLoss, self).__init__()
         self.failure_weight = failure_weight
-        
-    def forward(self, mu, log_var, labels, censored):
+        self.survival_weight = survival_weight
+        self.warmup_survival_weight = warmup_survival_weight
+
+    def forward(self, mu, log_var, labels, censored, is_warmup=False):
         mu = mu.view(-1)
         log_var = log_var.view(-1)
         labels = labels.view(-1)
         censored = censored.view(-1)
-        
+
+        u_mask = (censored == 0)
+        c_mask = (censored == 1)
+
         # Smoothly bound minimum log_var to -1.0 using softplus.
         log_var_bound = -1.0 + F.softplus(log_var)
-        
+
         # We clamp ONLY for the exp() to prevent float32 overflow (inf).
         # We MUST NOT clamp the penalty term `0.5 * log_var_bound` so gradients always flow!
         var_for_div = torch.exp(torch.clamp(log_var_bound, max=80.0))
         sigma_for_cdf = torch.sqrt(var_for_div) + 1e-6
-        
-        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian
-        # 0.5 * log(var) + 0.5 * (y - mu)^2 / var
-        loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
-        
+
+        # 1. Uncensored Loss: Negative Log Likelihood of Gaussian (or pure MSE in warmup)
+        if is_warmup:
+            loss_uncensored = 0.5 * ((labels - mu) ** 2)
+        else:
+            loss_uncensored = 0.5 * log_var_bound + 0.5 * ((labels - mu) ** 2) / var_for_div
+
         # 2. Censored Loss: Penalize the "Area" estimated below the minimum known RUL
-        # "예측값의 넓이로 최소 며칠 살았는지와 대조하여 그보다 낮게 추정한 면적만큼을 페널티"
-        # The probability area estimated below `labels` is exactly the CDF at `labels`.
-        # Standard Survival NLL is -log(1 - CDF). As the "lower area" (CDF) grows, the penalty grows.
-        
         # CDF of Normal distribution
         cdf = 0.5 * (1.0 + torch.erf((labels - mu) / (sigma_for_cdf * math.sqrt(2))))
-        
+
         # Survival probability = 1 - CDF
         surv_prob = 1.0 - cdf + 1e-7 # Epsilon for numerical stability
-        
+
         # Penalty (Negative Log Likelihood of survival)
         loss_censored = -torch.log(surv_prob)
-        
-        # Weighting uncensored loss to balance the dataset distribution.
-        loss = torch.where(censored == 1, loss_censored, loss_uncensored * self.failure_weight)
-        
-        return loss.mean(), loss_censored, loss_uncensored
+
+        # Calculate class-wise means safely
+        if u_mask.sum() > 0:
+            mean_loss_unc = loss_uncensored[u_mask].mean()
+        else:
+            mean_loss_unc = torch.tensor(0.0, device=mu.device)
+
+        if c_mask.sum() > 0:
+            mean_loss_cen = loss_censored[c_mask].mean()
+        else:
+            mean_loss_cen = torch.tensor(0.0, device=mu.device)
+
+        # Weighted combination based on training phase
+        if is_warmup:
+            loss = self.failure_weight * mean_loss_unc + self.warmup_survival_weight * mean_loss_cen
+        else:
+            loss = self.failure_weight * mean_loss_unc + self.survival_weight * mean_loss_cen
+
+        return loss, loss_censored, loss_uncensored
 
 class HeteroscedasticMLP(nn.Module):
     def __init__(self, input_dim):
@@ -105,7 +122,7 @@ def main():
 
     model = HeteroscedasticMLP(input_dim=len(features)).to(device)
     # Adjustable failure weight for experimentation
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=14.0).to(device)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05).to(device)
     
     # Use distinct learning rates: slower learning rate for variance head to prevent explosion
     warmup_epochs = 30
@@ -166,7 +183,7 @@ def main():
             
             optimizer.zero_grad()
             mu, log_var, _ = model(batch_x)
-            loss, lc, lu = criterion(mu, log_var, batch_y, batch_c)
+            loss, lc, lu = criterion(mu, log_var, batch_y, batch_c, is_warmup=is_warmup)
             loss.backward()
             optimizer.step()
             
@@ -241,7 +258,7 @@ def main():
                     print(f"  shared_out -> norm: {torch.norm(shared_out[idx_in_batch]).item():.4f} | max: {shared_out[idx_in_batch].max().item():.4f}")
                     print(f"  Outputs -> mu: {mu[idx_in_batch].item():.4f} | log_var: {log_var[idx_in_batch].item():.4f}")
                 
-                loss, _, _ = criterion(mu, log_var, batch_y, batch_c)
+                loss, _, _ = criterion(mu, log_var, batch_y, batch_c, is_warmup=False)
                 
                 mu_flat = mu.view(-1)
                 y_flat = batch_y.view(-1)
