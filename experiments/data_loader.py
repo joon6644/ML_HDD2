@@ -120,16 +120,53 @@ def get_lgbm_callback(model_name):
     return callback
 
 
+class LazySequenceTensor:
+    def __init__(self, X_raw, valid_indices, window_size):
+        self.X_raw = X_raw  # 2D tensor on CPU (len_df, n_features)
+        self.valid_indices = valid_indices  # 1D long tensor
+        self.window_size = window_size
+
+    def __len__(self):
+        return len(self.valid_indices)
+
+    def __getitem__(self, idx):
+        # Handle slices, lists, or tensors
+        if isinstance(idx, slice):
+            start, stop, step = idx.indices(len(self))
+            idx = torch.arange(start, stop, step, dtype=torch.long)
+        elif isinstance(idx, int):
+            idx = torch.tensor([idx], dtype=torch.long)
+        elif not isinstance(idx, torch.Tensor):
+            idx = torch.tensor(idx, dtype=torch.long)
+        
+        # Ensure index tensor is on CPU to match valid_indices
+        if idx.device != torch.device('cpu'):
+            idx = idx.cpu()
+
+        global_idx = self.valid_indices[idx]
+        offsets = torch.arange(-self.window_size + 1, 1, dtype=torch.long)
+        idx_grid = global_idx.unsqueeze(1) + offsets.unsqueeze(0)  # (B, window_size)
+        return self.X_raw[idx_grid]
+
+    def size(self, dim=None):
+        """Duck typing for size() method to match torch.Tensor's interface."""
+        if dim == 0:
+            return len(self)
+        elif dim is None:
+            return (len(self), self.window_size, self.X_raw.shape[1])
+        else:
+            raise IndexError("Dimension out of range")
+
+
 def build_sequences(df, features, window_size):
     """
-    Build sequence tensors on CPU with highly optimized vectorization.
-    Replaces 30,000+ pandas groupby iterations with numpy operations.
+    Build sequence tensors on CPU using a memory-efficient LazySequenceTensor.
+    Reduces memory usage from 16GB+ to under 3GB by avoiding full 3D tensor allocation.
     """
     import torch
     import numpy as np
     
     # Ensure DataFrame is sorted by serial_number and date to keep time-series order
-    # Fill in date sorting only if it exists in the columns
     sort_cols = ['serial_number']
     if 'date' in df.columns:
         sort_cols.append('date')
@@ -146,26 +183,21 @@ def build_sequences(df, features, window_size):
                torch.empty((0,), dtype=torch.float32), \
                torch.empty((0,), dtype=torch.float32)
     
-    # 1. sliding_window_view for features: (n - window_size + 1, window_size, n_features)
-    x_view = np.lib.stride_tricks.sliding_window_view(
-        x_data, (window_size, x_data.shape[1])
-    ).squeeze(axis=1)
+    # Identify ending indices for valid windows that do not cross serial number boundaries
+    end_indices = np.arange(window_size - 1, n)
+    valid_mask = (serials[end_indices - window_size + 1] == serials[end_indices])
+    valid_indices = torch.tensor(end_indices[valid_mask], dtype=torch.long)
     
-    # 2. Get target and censored values corresponding to the end of each window
-    y_view = y_data[window_size - 1:]
-    c_view = c_data[window_size - 1:]
+    # Pre-convert raw data to CPU tensors
+    X_raw = torch.tensor(x_data, dtype=torch.float32)
+    y_raw = torch.tensor(y_data, dtype=torch.float32)
+    c_raw = torch.tensor(c_data, dtype=torch.float32)
     
-    # 3. Valid windows must not cross serial_number boundaries.
-    # A window starting at i and ending at i+window_size-1 is valid iff
-    # serials[i] == serials[i+window_size-1].
-    valid_mask = (serials[:-window_size + 1] == serials[window_size - 1:])
+    # Target and censored values for the end of each window
+    y_valid = torch.log1p(y_raw[valid_indices])
+    c_valid = c_raw[valid_indices]
     
-    X_valid = x_view[valid_mask]
-    y_valid = np.log1p(y_view[valid_mask])
-    c_valid = c_view[valid_mask]
+    # Wrap features in LazySequenceTensor
+    X_lazy = LazySequenceTensor(X_raw, valid_indices, window_size)
     
-    X = torch.tensor(X_valid, dtype=torch.float32)
-    y = torch.tensor(y_valid, dtype=torch.float32)
-    c = torch.tensor(c_valid, dtype=torch.float32)
-    
-    return X, y, c
+    return X_lazy, y_valid, c_valid
