@@ -74,8 +74,10 @@ class HeteroscedasticMLP(nn.Module):
         self.shared = nn.Sequential(
             nn.Linear(input_dim, 64),
             nn.ReLU(),
+            nn.Dropout(0.2),
             nn.Linear(64, 32),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Dropout(0.2)
         )
         # Outputs two values: mu and log_var
         self.mu_head = nn.Linear(32, 1)
@@ -112,26 +114,35 @@ def main():
     del train_df, val_df
     gc.collect()
     
-    # Pin memory logic removed to prevent host OOM crash with large sequence data
-    
-    # Extremely large batch size to maximize GPU usage for this tiny model
-    batch_size = 262144
+    # --- Stratified batch sampling: guarantee fail/censored mix per batch ---
+    fail_idx = torch.where(c_train == 0)[0]   # uncensored (failed) indices
+    cen_idx  = torch.where(c_train == 1)[0]   # censored (survived) indices
+    n_fail_total = len(fail_idx)
+    n_cen_total  = len(cen_idx)
+    failure_ratio = n_fail_total / (n_fail_total + n_cen_total)
+    n_fail_per_batch = max(1, round(batch_size * failure_ratio))
+    n_cen_per_batch  = batch_size - n_fail_per_batch
+    # Number of complete batches is determined by the censored pool (larger group)
+    num_batches_strat = n_cen_total // n_cen_per_batch
+    print(f"Stratified batching: {n_fail_total:,} fail | {n_cen_total:,} censored")
+    print(f"  Per batch: {n_fail_per_batch} fail + {n_cen_per_batch} censored = {batch_size} total")
+    print(f"  Batches per epoch: {num_batches_strat:,}")
 
     model = HeteroscedasticMLP(input_dim=len(features)).to(device)
     # Adjustable failure weight for experimentation
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05).to(device)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=0.05, warmup_survival_weight=0.05).to(device)
     
     # Use distinct learning rates: slower learning rate for variance head to prevent explosion
-    warmup_epochs = 10
+    warmup_epochs = 6
     
-    # Phase 1: Sigma fixed
+    # Phase 1: Sigma fixed (logvar_head frozen)
     for param in model.logvar_head.parameters():
         param.requires_grad = False
         
     optimizer = optim.Adam([
         {'params': model.shared.parameters(), 'lr': 1e-3},
         {'params': model.mu_head.parameters(), 'lr': 1e-3}
-    ])
+    ], weight_decay=1e-5)
     
     epochs = 1000
     history = []
@@ -148,7 +159,7 @@ def main():
                 {'params': model.shared.parameters(), 'lr': 1e-3},
                 {'params': model.mu_head.parameters(), 'lr': 1e-3},
                 {'params': model.logvar_head.parameters(), 'lr': 1e-4}
-            ])
+            ], weight_decay=1e-5)
 
         model.train()
         total_loss = torch.tensor(0.0, device=device)
@@ -165,15 +176,29 @@ def main():
         epoch_lu_count = torch.tensor(0.0, device=device)
         epoch_mu_c_sum = torch.tensor(0.0, device=device)
         epoch_mu_u_sum = torch.tensor(0.0, device=device)
-        # Generate random indices natively on CPU
-        indices = torch.randperm(len(X_train), device='cpu')
-        num_batches = math.ceil(len(X_train) / batch_size)
+        # --- Stratified batch construction ---
+        # Shuffle both groups each epoch
+        fail_perm = fail_idx[torch.randperm(n_fail_total)]
+        cen_perm  = cen_idx[torch.randperm(n_cen_total)]
+        n_epoch_samples = num_batches_strat * batch_size
         
         # Use tqdm for progress bar
         desc_str = f"Epoch {epoch+1}/{epochs} (Warmup)" if is_warmup else f"Epoch {epoch+1}/{epochs} (Joint)"
-        train_pbar = tqdm(range(num_batches), desc=desc_str, leave=False)
+        train_pbar = tqdm(range(num_batches_strat), desc=desc_str, leave=False)
         for i in train_pbar:
-            batch_idx = indices[i * batch_size : (i + 1) * batch_size]
+            # Censored slice (sequential within epoch)
+            cen_start = i * n_cen_per_batch
+            batch_cen_idx = cen_perm[cen_start : cen_start + n_cen_per_batch]
+            # Fail slice (cycle through fail_perm across batches)
+            f_start = (i * n_fail_per_batch) % n_fail_total
+            f_end   = f_start + n_fail_per_batch
+            if f_end <= n_fail_total:
+                batch_fail_idx = fail_perm[f_start:f_end]
+            else:
+                batch_fail_idx = torch.cat([fail_perm[f_start:], fail_perm[:f_end - n_fail_total]])
+            # Merge and shuffle within batch
+            batch_idx = torch.cat([batch_fail_idx, batch_cen_idx])
+            batch_idx = batch_idx[torch.randperm(len(batch_idx))]
             batch_x = X_train[batch_idx].to(device, non_blocking=True)
             batch_y = y_train[batch_idx].to(device, non_blocking=True)
             batch_c = c_train[batch_idx].to(device, non_blocking=True)
@@ -236,7 +261,10 @@ def main():
                 batch_c = c_val[i * batch_size : (i + 1) * batch_size].to(device, non_blocking=True)
                 
                 mu, log_var, shared_out = model(batch_x)
-                val_log_vars.append(log_var.detach())
+                if is_warmup:
+                    val_log_vars.append(torch.zeros_like(log_var))
+                else:
+                    val_log_vars.append(log_var.detach())
                 
                 # Outlier diagnosis using dataframe information
                 extreme_mask = log_var > 1000
@@ -255,7 +283,7 @@ def main():
                     print(f"  shared_out -> norm: {torch.norm(shared_out[idx_in_batch]).item():.4f} | max: {shared_out[idx_in_batch].max().item():.4f}")
                     print(f"  Outputs -> mu: {mu[idx_in_batch].item():.4f} | log_var: {log_var[idx_in_batch].item():.4f}")
                 
-                loss, _, _ = criterion(mu, log_var, batch_y, batch_c, is_warmup=False)
+                loss, _, _ = criterion(mu, log_var, batch_y, batch_c, is_warmup=is_warmup)
                 
                 mu_flat = mu.view(-1)
                 y_flat = batch_y.view(-1)
@@ -302,7 +330,7 @@ def main():
             
         phase_str = "[Warm-up]" if is_warmup else "[Joint]"
         print(f"Epoch {epoch+1}/{epochs} {phase_str}")
-        print(f"  Train -> Loss: {(total_loss / len(X_train)).item():.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
+        print(f"  Train -> Loss: {(total_loss / n_epoch_samples).item():.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {(val_loss / len(X_val)).item():.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
         
         # Diagnostic prints as requested
@@ -319,14 +347,15 @@ def main():
         val_logvar_std = all_val_log_vars.std().item()
         val_logvar_min = all_val_log_vars.min().item()
         val_logvar_max = all_val_log_vars.max().item()
-        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
+        logvar_note = " [loss uses fixed var=1.0]" if is_warmup else ""
+        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}{logvar_note}")
         print("-" * 80)
 
         # Record metrics for CSV logging in real-time
         epoch_data = {
             'epoch': epoch + 1,
             'warmup': 1 if is_warmup else 0,
-            'train_loss': (total_loss / len(X_train)).item(),
+            'train_loss': (total_loss / n_epoch_samples).item(),
             'train_mse': t_mse,
             'train_rmse': t_rmse,
             'train_mae': t_mae,

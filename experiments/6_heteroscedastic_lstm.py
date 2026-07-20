@@ -67,12 +67,14 @@ class HeteroscedasticRightCensoredLoss(nn.Module):
         return loss, loss_censored, loss_uncensored
 
 class HeteroscedasticLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, num_layers=2):
+    def __init__(self, input_dim, hidden_dim=64, num_layers=2, dropout=0.2):
         super(HeteroscedasticLSTM, self).__init__()
-        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True)
+        # dropout applies between LSTM layers (requires num_layers >= 2)
+        self.lstm = nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout)
         self.shared = nn.Sequential(
             nn.Linear(hidden_dim, 32),
-            nn.ReLU()
+            nn.ReLU(),
+            nn.Dropout(dropout)  # FC dropout for regularization
         )
         self.mu_head = nn.Linear(32, 1)
         self.logvar_head = nn.Linear(32, 1)
@@ -85,7 +87,7 @@ class HeteroscedasticLSTM(nn.Module):
         log_var = self.logvar_head(shared_out)
         return mu, log_var, shared_out
 
-def eval_pass(model, criterion, X, y, c, batch_size, device):
+def eval_pass(model, criterion, X, y, c, batch_size, device, is_warmup=False):
     """Run evaluation pass using CPU memory with fast non-blocking transfer to GPU."""
     model.eval()
     val_loss = torch.tensor(0.0, device=device)
@@ -103,8 +105,11 @@ def eval_pass(model, criterion, X, y, c, batch_size, device):
             bc = c[i * batch_size:(i + 1) * batch_size].to(device, non_blocking=True)
 
             mu, log_var, _ = model(bx)
-            loss, _, _ = criterion(mu, log_var, by, bc, is_warmup=False)
-            val_log_vars.append(log_var.detach())
+            loss, _, _ = criterion(mu, log_var, by, bc, is_warmup=is_warmup)
+            if is_warmup:
+                val_log_vars.append(torch.zeros_like(log_var))
+            else:
+                val_log_vars.append(log_var.detach())
 
             pf = mu.view(-1)
             yf = by.view(-1)
@@ -146,15 +151,27 @@ def main():
     del train_df, val_df
     gc.collect()
 
-    # Pin memory logic removed to prevent host OOM crash with large sequence data
+    # --- Stratified batch sampling: guarantee fail/censored mix per batch ---
+    fail_idx = torch.where(c_train == 0)[0]   # uncensored (failed) indices
+    cen_idx  = torch.where(c_train == 1)[0]   # censored (survived) indices
+    n_fail_total = len(fail_idx)
+    n_cen_total  = len(cen_idx)
+    failure_ratio = n_fail_total / (n_fail_total + n_cen_total)
+    n_fail_per_batch = max(1, round(batch_size * failure_ratio))
+    n_cen_per_batch  = batch_size - n_fail_per_batch
+    # Number of complete batches is determined by the censored pool (larger group)
+    num_batches_strat = n_cen_total // n_cen_per_batch
+    print(f"Stratified batching: {n_fail_total:,} fail | {n_cen_total:,} censored")
+    print(f"  Per batch: {n_fail_per_batch} fail + {n_cen_per_batch} censored = {batch_size} total")
+    print(f"  Batches per epoch: {num_batches_strat:,}")
 
     model = HeteroscedasticLSTM(input_dim=len(features)).to(device)
-    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=1.0, warmup_survival_weight=0.05).to(device)
+    criterion = HeteroscedasticRightCensoredLoss(failure_weight=1.0, survival_weight=0.05, warmup_survival_weight=0.05).to(device)
 
     # Use distinct learning rates for stability
-    warmup_epochs = 10
+    warmup_epochs = 6
     
-    # Phase 1: Sigma fixed
+    # Phase 1: Sigma fixed (logvar_head frozen)
     for param in model.logvar_head.parameters():
         param.requires_grad = False
         
@@ -162,11 +179,10 @@ def main():
         {'params': model.lstm.parameters(), 'lr': 1e-3},
         {'params': model.shared.parameters(), 'lr': 1e-3},
         {'params': model.mu_head.parameters(), 'lr': 1e-3}
-    ])
+    ], weight_decay=1e-5)
 
     epochs = 100
     history = []
-    n_train = len(X_train)
     is_warmup = True
 
     print("Training Heteroscedastic LSTM model with area-based survival loss...")
@@ -181,7 +197,7 @@ def main():
                 {'params': model.shared.parameters(), 'lr': 1e-3},
                 {'params': model.mu_head.parameters(), 'lr': 1e-3},
                 {'params': model.logvar_head.parameters(), 'lr': 1e-4}
-            ])
+            ], weight_decay=1e-5)
 
         model.train()
         total_loss = torch.tensor(0.0, device=device)
@@ -199,14 +215,29 @@ def main():
         epoch_mu_c_sum = torch.tensor(0.0, device=device)
         epoch_mu_u_sum = torch.tensor(0.0, device=device)
 
-        indices = torch.randperm(n_train)
-        num_batches = math.ceil(n_train / batch_size)
+        # --- Stratified batch construction ---
+        # Shuffle both groups each epoch
+        fail_perm = fail_idx[torch.randperm(n_fail_total)]
+        cen_perm  = cen_idx[torch.randperm(n_cen_total)]
+        n_epoch_samples = num_batches_strat * batch_size
 
         # Use tqdm for progress bar
         desc_str = f"Epoch {epoch+1}/{epochs} (Warmup)" if is_warmup else f"Epoch {epoch+1}/{epochs} (Joint)"
-        train_pbar = tqdm(range(num_batches), desc=desc_str, leave=False)
+        train_pbar = tqdm(range(num_batches_strat), desc=desc_str, leave=False)
         for i in train_pbar:
-            batch_idx = indices[i * batch_size:(i + 1) * batch_size]
+            # Censored slice (sequential within epoch)
+            cen_start = i * n_cen_per_batch
+            batch_cen_idx = cen_perm[cen_start : cen_start + n_cen_per_batch]
+            # Fail slice (cycle through fail_perm across batches)
+            f_start = (i * n_fail_per_batch) % n_fail_total
+            f_end   = f_start + n_fail_per_batch
+            if f_end <= n_fail_total:
+                batch_fail_idx = fail_perm[f_start:f_end]
+            else:
+                batch_fail_idx = torch.cat([fail_perm[f_start:], fail_perm[:f_end - n_fail_total]])
+            # Merge and shuffle within batch
+            batch_idx = torch.cat([batch_fail_idx, batch_cen_idx])
+            batch_idx = batch_idx[torch.randperm(len(batch_idx))]
             batch_x = X_train[batch_idx].to(device, non_blocking=True)
             batch_y = y_train[batch_idx].to(device, non_blocking=True)
             batch_c = c_train[batch_idx].to(device, non_blocking=True)
@@ -252,7 +283,7 @@ def main():
                 total_uncensored += torch.sum(uf)
 
         val_loss, val_mse, val_mae, val_y_sum, val_y_sq_sum, val_uncensored, val_log_vars = eval_pass(
-            model, criterion, X_val, y_val, c_val, batch_size, device
+            model, criterion, X_val, y_val, c_val, batch_size, device, is_warmup=is_warmup
         )
 
         t_stats = torch.stack([
@@ -287,7 +318,7 @@ def main():
 
         phase_str = "[Warm-up]" if is_warmup else "[Joint]"
         print(f"Epoch {epoch+1}/{epochs} {phase_str}")
-        print(f"  Train -> Loss: {tl / n_train:.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
+        print(f"  Train -> Loss: {tl / n_epoch_samples:.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {vl / len(X_val):.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
 
         # Diagnostic prints
@@ -304,14 +335,15 @@ def main():
         val_logvar_std = all_val_log_vars.std().item()
         val_logvar_min = all_val_log_vars.min().item()
         val_logvar_max = all_val_log_vars.max().item()
-        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
+        logvar_note = " [loss uses fixed var=1.0]" if is_warmup else ""
+        print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}{logvar_note}")
         print("-" * 80)
 
         # Record metrics for CSV logging in real-time
         epoch_data = {
             'epoch': epoch + 1,
             'warmup': 1 if is_warmup else 0,
-            'train_loss': tl / n_train,
+            'train_loss': tl / n_epoch_samples,
             'train_mse': t_mse,
             'train_rmse': t_rmse,
             'train_mae': t_mae,
