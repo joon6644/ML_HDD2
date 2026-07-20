@@ -1,4 +1,4 @@
-﻿import lightgbm as lgb
+import lightgbm as lgb
 import numpy as np
 from data_loader import get_data
 import scipy.special as special
@@ -162,17 +162,10 @@ def main():
         label=train_df['log_RUL'], 
         weight=train_df['censored']
     )
-    # Sample 500k rows for fast validation during training
-    np.random.seed(42)
-    val_sample_idx = np.random.choice(len(val_df), size=min(500000, len(val_df)), replace=False)
-    val_sample_df = val_df.iloc[val_sample_idx]
-    
-    val_data = lgb.Dataset(
-        val_sample_df[features], 
-        label=val_sample_df['log_RUL'], 
-        weight=val_sample_df['censored'],
-        reference=train_data
-    )
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    import gc
+    del train_df, val_sample_df
+    gc.collect()
     
     params = {
         'learning_rate': 0.02,
@@ -182,6 +175,7 @@ def main():
         'num_class': 2
     }
     
+    from data_loader import get_lgbm_callback
     print("Training LightGBM Heteroscedastic Log-Normal AFT model (Fail Only)...")
     gbm = lgb.train(
         params,
@@ -190,7 +184,8 @@ def main():
         valid_sets=[train_data, val_data],
         feval=aft_eval,
         callbacks=[
-            custom_log_evaluation(period=10)
+            custom_log_evaluation(period=10),
+            get_lgbm_callback("6_heteroscedastic_lgbm_failonly")
         ]
     )
     

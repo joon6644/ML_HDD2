@@ -73,6 +73,9 @@ class HeteroscedasticMLP(nn.Module):
 def main():
     train_df, val_df, features = get_data()
     
+    # Only train on failure data
+    train_df = train_df[train_df['censored'] == 0].copy()
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     train_df['log_RUL'] = np.log1p(train_df['RUL'])
@@ -129,7 +132,7 @@ def main():
         epoch_lu_count = torch.tensor(0.0, device=device)
         epoch_mu_c_sum = torch.tensor(0.0, device=device)
         epoch_mu_u_sum = torch.tensor(0.0, device=device)
-        # Generate random indices natively on CPU
+        # Generate random indices for shuffling natively on CPU
         indices = torch.randperm(len(X_train), device='cpu')
         num_batches = math.ceil(len(X_train) / batch_size)
         
@@ -284,8 +287,8 @@ def main():
         print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
         print("-" * 80)
 
-        # Record metrics for CSV logging
-        history.append({
+        # Record metrics for CSV logging in real-time
+        epoch_data = {
             'epoch': epoch + 1,
             'train_loss': (total_loss / len(X_train)).item(),
             'train_mse': t_mse,
@@ -303,11 +306,12 @@ def main():
             'diag_val_logvar_std': val_logvar_std,
             'diag_val_logvar_min': val_logvar_min,
             'diag_val_logvar_max': val_logvar_max
-        })
+        }
+        history.append(epoch_data)
+        from data_loader import log_epoch_to_csv
+        log_epoch_to_csv("5_heteroscedastic_mlp_failonly", epoch_data)
 
     print("Training finished.")
-    from data_loader import save_epoch_results
-    save_epoch_results("4_heteroscedastic_mlp", history)
 
 if __name__ == "__main__":
     main()

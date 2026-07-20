@@ -202,8 +202,8 @@ def main():
         print(f"  Train -> Loss: {(total_loss / len(X_train)).item():.4f} | MSE: {t_mse:.4f} | RMSE: {t_rmse:.4f} | MAE: {t_mae:.4f} | R2: {t_r2:.4f}")
         print(f"  Val   -> Loss: {(val_loss / len(X_val)).item():.4f} | MSE: {v_mse:.4f} | RMSE: {v_rmse:.4f} | MAE: {v_mae:.4f} | R2: {v_r2:.4f}")
         
-        # Record metrics for CSV logging
-        history.append({
+        # Record metrics for CSV logging in real-time
+        epoch_data = {
             'epoch': epoch + 1,
             'train_loss': (total_loss / len(X_train)).item(),
             'train_mse': t_mse,
@@ -215,11 +215,12 @@ def main():
             'val_rmse': v_rmse,
             'val_mae': v_mae,
             'val_r2': v_r2
-        })
+        }
+        history.append(epoch_data)
+        from data_loader import log_epoch_to_csv
+        log_epoch_to_csv("2_mlp_regression_failonly", epoch_data)
         
     print("Training finished.")
-    from data_loader import save_epoch_results
-    save_epoch_results("2_mlp_regression_failonly", history)
 
 if __name__ == "__main__":
     main()

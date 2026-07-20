@@ -291,8 +291,8 @@ def main():
         print(f"  [Diagnostics] log_var (Val) -> mean: {val_logvar_mean:.4f} | std: {val_logvar_std:.4f} | min: {val_logvar_min:.4f} | max: {val_logvar_max:.4f}")
         print("-" * 80)
 
-        # Record metrics for CSV logging
-        history.append({
+        # Record metrics for CSV logging in real-time
+        epoch_data = {
             'epoch': epoch + 1,
             'train_loss': tl / n_train,
             'train_mse': t_mse,
@@ -310,11 +310,12 @@ def main():
             'diag_val_logvar_std': val_logvar_std,
             'diag_val_logvar_min': val_logvar_min,
             'diag_val_logvar_max': val_logvar_max
-        })
+        }
+        history.append(epoch_data)
+        from data_loader import log_epoch_to_csv
+        log_epoch_to_csv("7_heteroscedastic_gru", epoch_data)
 
     print("Training finished.")
-    from data_loader import save_epoch_results
-    save_epoch_results("7_heteroscedastic_gru", history)
 
 if __name__ == "__main__":
     main()

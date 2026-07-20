@@ -78,3 +78,43 @@ def save_epoch_results(model_name, history_list):
         df = df[cols]
     df.to_csv(csv_path, index=False)
     print(f"Saved epoch results to {csv_path}")
+
+
+def log_epoch_to_csv(model_name, epoch_data_dict):
+    """
+    Saves a single epoch's metrics to results/{model_name}.csv in real-time.
+    If epoch is 1, it overwrites/creates the file. Otherwise, it appends.
+    """
+    import os
+    import csv
+    results_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "results")
+    os.makedirs(results_dir, exist_ok=True)
+    csv_path = os.path.join(results_dir, f"{model_name}.csv")
+    
+    epoch = epoch_data_dict.get('epoch', 1)
+    headers = ['epoch'] + sorted([k for k in epoch_data_dict.keys() if k != 'epoch'])
+    
+    mode = 'w' if epoch == 1 else 'a'
+    write_header = (mode == 'w') or (not os.path.exists(csv_path))
+    
+    with open(csv_path, mode=mode, newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        if write_header:
+            writer.writeheader()
+        writer.writerow(epoch_data_dict)
+
+
+def get_lgbm_callback(model_name):
+    """
+    Returns a custom LightGBM callback that logs evaluation results to CSV in real-time.
+    """
+    def callback(env):
+        epoch = env.iteration + 1
+        row = {'epoch': epoch}
+        for dataset_name, metric_name, value, is_higher_better in env.evaluation_result_list:
+            name_map = {'training': 'train', 'valid_1': 'val'}
+            prefix = name_map.get(dataset_name, dataset_name)
+            disp_name = 'loss' if metric_name == 'aft_loss' else metric_name
+            row[f"{prefix}_{disp_name}"] = value
+        log_epoch_to_csv(model_name, row)
+    return callback

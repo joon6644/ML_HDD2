@@ -151,6 +151,19 @@ def main():
         'objective': custom_aft_objective
     }
     
+    # 텐서 변환 완료 후 대용량 pandas DataFrame들을 즉시 지우고 가비지 컬렉터 강제 구동
+    import gc
+    del train_df, val_df, val_sample_df
+    gc.collect()
+
+    params = {
+        'learning_rate': 0.02,
+        'num_leaves': 31,
+        'verbose': 1,
+        'objective': custom_aft_objective
+    }
+    
+    from data_loader import get_lgbm_callback
     print("Training LightGBM Log-Normal AFT model...")
     gbm = lgb.train(
         params,
@@ -159,7 +172,8 @@ def main():
         valid_sets=[train_data, val_data],
         feval=aft_eval,
         callbacks=[
-            custom_log_evaluation(period=10)
+            custom_log_evaluation(period=10),
+            get_lgbm_callback("1_lgbm_regression_failonly")
         ]
     )
     
