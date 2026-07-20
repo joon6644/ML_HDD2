@@ -162,7 +162,7 @@ def run_base_preprocessing(input_file: str, db_file: str, max_memory: str = "6GB
     ffill_selects_str = ", ".join(ffill_selects)
     
     con.execute(f"""
-        CREATE OR REPLACE VIEW final_preprocessed AS
+        CREATE OR REPLACE VIEW final_filled AS
         SELECT 
             serial_number,
             record_date::VARCHAR AS date,
@@ -171,5 +171,21 @@ def run_base_preprocessing(input_file: str, db_file: str, max_memory: str = "6GB
         FROM segment_joined
     """)
     print(f"  - 완료 (소요시간: {time.time() - t0:.2f}초)")
-    
+
+    # 6-1. SMART 컬럼 전체가 NULL인 행 제거
+    # ffill + bfill 모두 적용 후에도 남아있는 null은 원본 자체가 완전히 비어있는 레코드.
+    # (예: 단일 레코드 디바이스인데 그 값 자체가 null인 경우)
+    # 이 행들은 복구 불가능하므로 최종 뷰에서 제거한다.
+    print("\n[Step 5-1] SMART 컬럼 전체가 NULL인 행 제거...")
+    t0 = time.time()
+    # 하나라도 NOT NULL이면 유효한 행 → 모든 컬럼이 IS NULL인 행만 제거
+    null_filter = " OR ".join([f'"{col}" IS NOT NULL' for col in valid_smart_cols])
+    con.execute(f"""
+        CREATE OR REPLACE VIEW final_preprocessed AS
+        SELECT * FROM final_filled
+        WHERE {null_filter}
+    """)
+    print(f"  - 완료 (소요시간: {time.time() - t0:.2f}초)")
+    print(f"  - [참고] 조건: 모든 SMART 컬럼이 NULL인 행 제거 (ffill/bfill 복구 불가 레코드)")
+
     return con, valid_smart_cols
