@@ -118,9 +118,10 @@ def run_base_preprocessing(input_file: str, db_file: str, max_memory: str = "6GB
     """)
     print(f"  - 완료 (소요시간: {time.time() - t0:.2f}초)")
     
-    # 6. 결측 데이터 Forward fill 처리
-    # 조인 후 LAST_VALUE(IGNORE NULLS)를 사용해 결측 전방 채우기 진행
-    print("\n[Step 5] 시계열 데이터 결합 및 Forward Fill 결측치 처리...")
+    # 6. 결측 데이터 Forward Fill + Backward Fill fallback 처리
+    # - Forward Fill: LAST_VALUE(IGNORE NULLS)로 이전 유효값 전파
+    # - Backward Fill fallback: 세그먼트 첫 행이 null이면(이전 값 없음) 다음 유효값으로 채움
+    print("\n[Step 5] 시계열 데이터 결합 및 Forward Fill + Backward Fill 결측치 처리...")
     t0 = time.time()
     col_selects = ", ".join([f'o."{col}"' for col in valid_smart_cols])
     con.execute(f"""
@@ -140,10 +141,23 @@ def run_base_preprocessing(input_file: str, db_file: str, max_memory: str = "6GB
     """)
     
     ffill_selects = []
-    ffill_selects.append('LAST_VALUE("model" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date) AS "model"')
+    # model: forward fill → backward fill fallback (세그먼트 첫 행 null 대응)
+    ffill_selects.append(
+        'COALESCE('
+        '  LAST_VALUE("model" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date),'
+        '  FIRST_VALUE("model" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)'
+        ') AS "model"'
+    )
     ffill_selects.append('COALESCE(TRY_CAST("failure" AS INTEGER), 0) AS "failure"')
     for col in valid_smart_cols:
-        ffill_selects.append(f'LAST_VALUE("{col}" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date) AS "{col}"')
+        # forward fill: 이전 유효값으로 채우기
+        # backward fill fallback: 세그먼트 내 첫 행부터 null이면 다음 유효값으로 채우기
+        ffill_selects.append(
+            f'COALESCE('
+            f'  LAST_VALUE("{col}" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date),'
+            f'  FIRST_VALUE("{col}" IGNORE NULLS) OVER (PARTITION BY serial_number, segment ORDER BY record_date ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING)'
+            f') AS "{col}"'
+        )
         
     ffill_selects_str = ", ".join(ffill_selects)
     
