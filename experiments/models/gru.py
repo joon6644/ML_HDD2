@@ -1,3 +1,4 @@
+import copy
 import math
 import numpy as np
 import torch
@@ -5,15 +6,16 @@ import torch.nn as nn
 import torch.optim as optim
 from tqdm import tqdm
 
-# Model Hyperparameters
+# Unified Deep Learning Hyperparameters (딥러닝 일관 수치)
 HYPERPARAMS = {
     "hidden_dim": 64,
     "num_layers": 2,
     "dropout": 0.2,
-    "epochs": 6,
+    "epochs": 30,
     "batch_size": 16384,
     "lr": 1e-3,
     "weight_decay": 1e-5,
+    "patience": 5,
     "focal_gamma": 2.0,
     "focal_alpha": 0.25
 }
@@ -53,9 +55,9 @@ class GRUClass(nn.Module):
         last_out = gru_out[:, -1, :]
         return self.fc(last_out)
 
-def train_gru_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, use_focal_loss: bool = False, custom_params: dict = None):
+def train_gru_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is_cost_sensitive: bool = False, use_focal_loss: bool = False, custom_params: dict = None):
     """
-    Trains PyTorch GRU 3D sequence model for 30-day binary failure classification.
+    Trains PyTorch GRU 3D sequence model with early stopping on validation set.
     """
     hp = HYPERPARAMS.copy()
     if custom_params:
@@ -63,8 +65,29 @@ def train_gru_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, us
 
     torch.manual_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Training GRU Classifier (FocalLoss={use_focal_loss}) on device: {device}...")
     
+    if not isinstance(y_train, torch.Tensor):
+        y_train_t = torch.tensor(y_train, dtype=torch.float32)
+    else:
+        y_train_t = y_train
+
+    has_val = (X_val is not None and y_val is not None)
+    if has_val:
+        if not isinstance(y_val, torch.Tensor):
+            y_val_t = torch.tensor(y_val, dtype=torch.float32)
+        else:
+            y_val_t = y_val
+
+    if is_cost_sensitive:
+        n_pos = torch.sum(y_train_t == 1).item()
+        n_neg = len(y_train_t) - n_pos
+        scale_pos_weight = math.sqrt(n_neg / n_pos) if n_pos > 0 else 1.0
+        pos_weight_tensor = torch.tensor([scale_pos_weight], dtype=torch.float32, device=device)
+        print(f"Training GRU (Cost-Sensitive sqrt pos_weight={scale_pos_weight:.2f}, max_epochs={hp['epochs']}, patience={hp['patience']}) on device: {device}...")
+    else:
+        pos_weight_tensor = None
+        print(f"Training GRU (Unweighted, FocalLoss={use_focal_loss}, max_epochs={hp['epochs']}, patience={hp['patience']}) on device: {device}...")
+
     sample_seq = X_train[0]
     input_dim = sample_seq.shape[-1]
     
@@ -73,47 +96,31 @@ def train_gru_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, us
     if use_focal_loss:
         criterion = BinaryFocalLoss(alpha=hp['focal_alpha'], gamma=hp['focal_gamma']).to(device)
     else:
-        criterion = nn.BCEWithLogitsLoss().to(device)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor).to(device)
         
     optimizer = optim.Adam(model.parameters(), lr=hp['lr'], weight_decay=hp['weight_decay'])
     
     n_samples = len(X_train)
     batch_size = hp['batch_size']
     epochs = hp['epochs']
+    num_batches = math.ceil(n_samples / batch_size)
     
-    pos_idx = torch.where(y_train == 1)[0]
-    neg_idx = torch.where(y_train == 0)[0]
-    n_pos, n_neg = len(pos_idx), len(neg_idx)
-    pos_ratio = n_pos / (n_pos + n_neg) if (n_pos + n_neg) > 0 else 0.5
-    
-    n_pos_per_batch = max(1, round(batch_size * pos_ratio))
-    n_neg_per_batch = batch_size - n_pos_per_batch
-    num_batches = n_neg // n_neg_per_batch if n_neg_per_batch > 0 else 1
-    
+    best_val_loss = float('inf')
+    best_model_weights = None
+    patience_counter = 0
+    patience = hp['patience']
+
     print(f"Training GRU: {n_samples:,} sequences over {num_batches} batches/epoch...")
     for epoch in range(epochs):
         model.train()
         total_loss = 0.0
-        pos_perm = pos_idx[torch.randperm(n_pos)]
-        neg_perm = neg_idx[torch.randperm(n_neg)]
+        perm = torch.randperm(n_samples)
         
         pbar = tqdm(range(num_batches), desc=f"Epoch {epoch+1}/{epochs}", leave=False)
         for i in pbar:
-            neg_start = i * n_neg_per_batch
-            batch_neg_idx = neg_perm[neg_start : neg_start + n_neg_per_batch]
-            
-            pos_start = (i * n_pos_per_batch) % n_pos
-            pos_end = pos_start + n_pos_per_batch
-            if pos_end <= n_pos:
-                batch_pos_idx = pos_perm[pos_start:pos_end]
-            else:
-                batch_pos_idx = torch.cat([pos_perm[pos_start:], pos_perm[:pos_end - n_pos]])
-                
-            batch_idx = torch.cat([batch_pos_idx, batch_neg_idx])
-            batch_idx = batch_idx[torch.randperm(len(batch_idx))]
-            
-            batch_x = X_train[batch_idx].to(device)
-            batch_y = y_train[batch_idx].to(device).view(-1, 1)
+            idx = perm[i * batch_size : (i + 1) * batch_size]
+            batch_x = X_train[idx].to(device)
+            batch_y = y_train_t[idx].to(device).view(-1, 1)
             
             optimizer.zero_grad()
             logits = model(batch_x)
@@ -122,7 +129,35 @@ def train_gru_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, us
             optimizer.step()
             total_loss += loss.item() * len(batch_x)
             
-        print(f"  Epoch [{epoch+1}/{epochs}] Loss: {total_loss / (num_batches * batch_size):.4f}")
+        train_loss = total_loss / n_samples
         
+        # Validation & Early Stopping Check
+        if has_val:
+            model.eval()
+            with torch.no_grad():
+                val_logits = []
+                val_batch_size = hp['batch_size']
+                for vi in range(0, len(X_val), val_batch_size):
+                    vx = X_val[vi:vi+val_batch_size].to(device)
+                    val_logits.append(model(vx))
+                val_logits_t = torch.cat(val_logits)
+                val_loss = criterion(val_logits_t, y_val_t.to(device).view(-1, 1)).item()
+                
+            print(f"  Epoch [{epoch+1}/{epochs}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f}")
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_model_weights = copy.deepcopy(model.state_dict())
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print(f"[Early Stopping] Triggered at epoch {epoch+1}. Restoring best model weights (Val Loss: {best_val_loss:.4f}).")
+                    break
+        else:
+            print(f"  Epoch [{epoch+1}/{epochs}] Train Loss: {train_loss:.4f}")
+
+    if best_model_weights is not None:
+        model.load_state_dict(best_model_weights)
+
     print("GRU training complete.")
     return model

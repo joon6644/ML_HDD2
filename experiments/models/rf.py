@@ -20,9 +20,9 @@ def train_rf_model(X_train, y_train, seed: int = 42, is_cost_sensitive: bool = F
     if is_cost_sensitive:
         n_pos = np.sum(y_train == 1)
         n_neg = len(y_train) - n_pos
-        scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
+        scale_pos_weight = float(np.sqrt(n_neg / n_pos)) if n_pos > 0 else 1.0
         class_weight = {0: 1.0, 1: scale_pos_weight}
-        print(f"Training Random Forest (Cost-Sensitive scale_pos_weight={scale_pos_weight:.2f}, n_estimators={hp['n_estimators']})...")
+        print(f"Training Random Forest (Cost-Sensitive sqrt scale_pos_weight={scale_pos_weight:.2f}, n_estimators={hp['n_estimators']})...")
     else:
         class_weight = None
         print(f"Training Random Forest (Unweighted, n_estimators={hp['n_estimators']})...")

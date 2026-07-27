@@ -1,7 +1,7 @@
 import numpy as np
 import lightgbm as lgb
 
-# Model Hyperparameters
+# Standard Benchmark Hyperparameters (국룰값)
 HYPERPARAMS = {
     'learning_rate': 0.05,
     'num_leaves': 31,
@@ -9,14 +9,13 @@ HYPERPARAMS = {
     'objective': 'binary',
     'metric': 'binary_logloss',
     'min_data_in_leaf': 100,
-    'num_boost_round': 200,
+    'num_boost_round': 300,
     'early_stopping_rounds': 20
 }
 
 def train_lgbm_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is_cost_sensitive: bool = False, use_gpu: bool = False, custom_params: dict = None):
     """
-    Trains LightGBM classifier for 30-day binary failure classification.
-    Uses exact scale_pos_weight (N_neg / N_pos) when cost-sensitive learning is requested.
+    Trains LightGBM classifier with early stopping on validation set.
     """
     hp = HYPERPARAMS.copy()
     if custom_params:
@@ -25,11 +24,11 @@ def train_lgbm_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, i
     if is_cost_sensitive:
         n_pos = np.sum(y_train == 1)
         n_neg = len(y_train) - n_pos
-        scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-        print(f"Training LightGBM (Cost-Sensitive scale_pos_weight={scale_pos_weight:.2f}, num_boost_round={hp['num_boost_round']})...")
+        scale_pos_weight = float(np.sqrt(n_neg / n_pos)) if n_pos > 0 else 1.0
+        print(f"Training LightGBM (Cost-Sensitive sqrt scale_pos_weight={scale_pos_weight:.2f}, max_round={hp['num_boost_round']}, early_stopping={hp['early_stopping_rounds']})...")
     else:
         scale_pos_weight = 1.0
-        print(f"Training LightGBM (Unweighted, num_boost_round={hp['num_boost_round']})...")
+        print(f"Training LightGBM (Unweighted, max_round={hp['num_boost_round']}, early_stopping={hp['early_stopping_rounds']})...")
 
     train_data = lgb.Dataset(X_train, label=y_train)
     val_data = lgb.Dataset(X_val, label=y_val, reference=train_data) if (X_val is not None and y_val is not None) else None
@@ -58,6 +57,5 @@ def train_lgbm_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, i
         print("[Notice] LightGBM GPU Learner fallback to CPU...")
         lgb_params['device'] = 'cpu'
         gbm = lgb.train(lgb_params, train_data, num_boost_round=hp['num_boost_round'], valid_sets=valid_sets, callbacks=callbacks)
-        
-    print("LightGBM training complete.")
+
     return gbm

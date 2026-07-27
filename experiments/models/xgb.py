@@ -1,19 +1,19 @@
 import numpy as np
 from xgboost import XGBClassifier
 
-# Model Hyperparameters
+# Standard Benchmark Hyperparameters (국룰값)
 HYPERPARAMS = {
-    "n_estimators": 100,
+    "n_estimators": 300,
     "learning_rate": 0.05,
     "max_depth": 6,
     "tree_method": 'hist',
-    "eval_metric": 'logloss'
+    "eval_metric": 'logloss',
+    "early_stopping_rounds": 20
 }
 
 def train_xgb_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is_cost_sensitive: bool = False, custom_params: dict = None):
     """
-    Trains XGBoost classifier for 30-day binary failure classification.
-    Uses exact scale_pos_weight (N_neg / N_pos) when cost-sensitive learning is requested.
+    Trains XGBoost classifier with early stopping on validation set.
     """
     hp = HYPERPARAMS.copy()
     if custom_params:
@@ -22,12 +22,14 @@ def train_xgb_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is
     if is_cost_sensitive:
         n_pos = np.sum(y_train == 1)
         n_neg = len(y_train) - n_pos
-        scale_pos_weight = n_neg / n_pos if n_pos > 0 else 1.0
-        print(f"Training XGBoost (Cost-Sensitive scale_pos_weight={scale_pos_weight:.2f}, n_estimators={hp['n_estimators']})...")
+        scale_pos_weight = float(np.sqrt(n_neg / n_pos)) if n_pos > 0 else 1.0
+        print(f"Training XGBoost (Cost-Sensitive sqrt scale_pos_weight={scale_pos_weight:.2f}, n_estimators={hp['n_estimators']}, early_stopping={hp['early_stopping_rounds']})...")
     else:
         scale_pos_weight = 1.0
-        print(f"Training XGBoost (Unweighted, n_estimators={hp['n_estimators']})...")
+        print(f"Training XGBoost (Unweighted, n_estimators={hp['n_estimators']}, early_stopping={hp['early_stopping_rounds']})...")
 
+    has_val = (X_val is not None and y_val is not None)
+    
     xgb = XGBClassifier(
         n_estimators=hp['n_estimators'],
         learning_rate=hp['learning_rate'],
@@ -36,11 +38,12 @@ def train_xgb_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is
         tree_method=hp['tree_method'],
         device='cuda',
         random_state=seed,
-        eval_metric=hp['eval_metric']
+        eval_metric=hp['eval_metric'],
+        early_stopping_rounds=hp['early_stopping_rounds'] if has_val else None
     )
     
     eval_set = [(X_train, y_train)]
-    if X_val is not None and y_val is not None:
+    if has_val:
         eval_set.append((X_val, y_val))
         
     try:
@@ -55,9 +58,9 @@ def train_xgb_model(X_train, y_train, X_val=None, y_val=None, seed: int = 42, is
             tree_method=hp['tree_method'],
             device='cpu',
             random_state=seed,
-            eval_metric=hp['eval_metric']
+            eval_metric=hp['eval_metric'],
+            early_stopping_rounds=hp['early_stopping_rounds'] if has_val else None
         )
         xgb.fit(X_train, y_train, eval_set=eval_set, verbose=False)
-        
-    print("XGBoost training complete.")
+
     return xgb

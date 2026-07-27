@@ -1,7 +1,11 @@
 import os
 import sys
+from datetime import datetime
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc, precision_score, recall_score, f1_score
 try:
     import torch
@@ -83,7 +87,7 @@ class RollingEvaluator:
         valid_dates = df_sorted['date'].values
         x_raw = df_sorted[self.features].values
         
-        if self.model_type in ['lightgbm', 'xgb', 'rf', 'sklearn']:
+        if self.window_size == 1 and not (hasattr(self.model, 'is_pytorch') and self.model.is_pytorch):
             if hasattr(self.model, 'predict_proba'):
                 preds = self.model.predict_proba(x_raw)[:, 1]
             elif hasattr(self.model, 'predict'):
@@ -103,9 +107,12 @@ class RollingEvaluator:
         else:
             x_batch = x_tensor
             
-        with torch.no_grad():
-            logits = self.model(x_batch)
-            preds = torch.sigmoid(logits).view(-1).cpu().numpy()
+        if hasattr(self.model, 'predict_proba'):
+            preds = self.model.predict_proba(x_batch)[:, 1]
+        else:
+            with torch.no_grad():
+                logits = self.model(x_batch)
+                preds = torch.sigmoid(logits).view(-1).cpu().numpy()
             
         return valid_dates, y_true, preds
 
@@ -243,7 +250,7 @@ class RollingEvaluator:
         report_df = self.build_report_from_raw_predictions(raw_preds, target_threshold, lead_time=lead_time)
         metrics = analyze_report(report_df, threshold=target_threshold)
         metrics['threshold'] = target_threshold
-        return metrics
+        return metrics, report_df
 
 
 def analyze_report(report_df, threshold=None):
@@ -270,6 +277,10 @@ def analyze_report(report_df, threshold=None):
     median_lt = float(np.median(lead_times)) if len(lead_times) > 0 else 0.0
     std_lt = float(np.std(lead_times)) if len(lead_times) > 0 else 0.0
 
+    # Calculate EDR@15 (Early Detection Ratio within 15 days before failure)
+    edr_15_count = sum(1 for lt in lead_times if lt >= 15)
+    edr_15 = float(edr_15_count / failed_disks) if failed_disks > 0 else 0.0
+
     print("\n" + "="*50)
     print("      ROLLING INFERENCE ALARM DETAILED ANALYSIS      ")
     print("="*50)
@@ -281,6 +292,7 @@ def analyze_report(report_df, threshold=None):
     print(f"Precision / Recall / F1: {precision:.4%} / {recall:.4%} / {f1:.4%}")
     print(f"FAR (False Alarm Rate): {far:.4%}")
     print(f"Median Lead Time      : {median_lt:.2f} days (Mean: {mean_lt:.2f}d, Std: {std_lt:.2f}d)")
+    print(f"EDR@15 (Early Detect) : {edr_15:.4%}")
     print("="*50 + "\n")
 
     return {
@@ -293,8 +305,49 @@ def analyze_report(report_df, threshold=None):
         'f1': f1,
         'far': far,
         'median_lead_time': median_lt,
-        'mean_lead_time': mean_lt
+        'mean_lead_time': mean_lt,
+        'edr_15': edr_15
     }
+
+
+def save_lead_time_distribution(report_df, save_dir: str, filename_prefix: str = "evaluation"):
+    """
+    Saves lead time distribution per-disk data as CSV and generates a high-quality visualization plot PNG.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    hit_disks = report_df[report_df['is_hit'] == 1].copy()
+    lead_times = hit_disks['days_to_failure_at_alarm'].dropna().values
+
+    # 1. Save Lead Time Distribution Data CSV
+    lt_csv_path = os.path.join(save_dir, f"{filename_prefix}_lead_time_distribution.csv")
+    cols_to_save = ['serial_number', 'actual_failure_date', 'first_alarm_date', 'days_to_failure_at_alarm', 'alarm_predicted_score']
+    existing_cols = [c for c in cols_to_save if c in hit_disks.columns]
+    hit_disks[existing_cols].to_csv(lt_csv_path, index=False, encoding='utf-8-sig')
+
+    # 2. Save Visualization Plot PNG
+    plot_path = os.path.join(save_dir, f"{filename_prefix}_lead_time_plot.png")
+    plt.figure(figsize=(9, 5))
+    if len(lead_times) > 0:
+        sns.histplot(lead_times, bins=min(30, max(5, len(np.unique(lead_times)))), kde=True, color='#2b5c8f', edgecolor='black')
+        median_lt = float(np.median(lead_times))
+        mean_lt = float(np.mean(lead_times))
+        plt.axvline(median_lt, color='red', linestyle='--', linewidth=2, label=f'Median LT: {median_lt:.1f}d')
+        plt.axvline(mean_lt, color='orange', linestyle=':', linewidth=2, label=f'Mean LT: {mean_lt:.1f}d')
+        plt.legend(fontsize=11)
+    else:
+        plt.text(0.5, 0.5, 'No Hit Alarms Triggered', horizontalalignment='center', verticalalignment='center', fontsize=14)
+
+    plt.title(f"Lead Time Distribution ({filename_prefix})", fontsize=13, fontweight='bold')
+    plt.xlabel("Lead Time (Days to Failure at Alarm)", fontsize=11)
+    plt.ylabel("Disk Count", fontsize=11)
+    plt.grid(True, linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(plot_path, dpi=300)
+    plt.close()
+
+    print(f"Saved Lead Time CSV : {lt_csv_path}")
+    print(f"Saved Lead Time Plot: {plot_path}")
+    return lt_csv_path, plot_path
 
 
 def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, save_dir: str, filename_prefix: str = "evaluation"):
@@ -328,7 +381,7 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
             'Recall': f"{disk_metrics.get('recall', 0.0):.4f}",
             'F1_Score': f"{disk_metrics.get('f1', 0.0):.4f}",
             'FAR': f"{disk_metrics.get('far', 0.0):.4f}",
-            'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Median LT: {disk_metrics.get('median_lead_time', 0.0):.2f}d | Mean LT: {disk_metrics.get('mean_lead_time', 0.0):.2f}d"
+            'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Median LT: {disk_metrics.get('median_lead_time', 0.0):.2f}d | EDR@15: {disk_metrics.get('edr_15', 0.0):.4f}"
         }
     ]
 
@@ -336,10 +389,92 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
     df_concat.to_csv(csv_path, index=False, encoding='utf-8-sig')
 
     print("\n" + "="*70)
-    print("📊 CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT")
+    print("[SUMMARY] CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT")
     print("="*70)
     print(df_concat.to_string(index=False))
     print("="*70)
     print(f"Saved concatenated confusion matrix to: {csv_path}\n")
 
     return df_concat
+
+
+def append_master_experiment_result(
+    model_name: str,
+    dataset_name: str,
+    imbalance_strategy: str,
+    drop_failure_day: bool,
+    row_metrics: dict,
+    disk_metrics: dict,
+    master_csv_path: str = None
+):
+    """
+    Permanently appends experiment run metrics to a master CSV file.
+    If the master CSV file is locked by Excel (PermissionError), automatically saves to a temporary backup file
+    (results/backup_master_results.csv) and auto-syncs with UTF-8 BOM encoding when Excel is closed on the next run!
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    results_dir = os.path.join(project_root, "results")
+    os.makedirs(results_dir, exist_ok=True)
+
+    if master_csv_path is None:
+        master_csv_path = os.path.join(results_dir, "master_experiment_results.csv")
+        
+    backup_csv_path = os.path.join(results_dir, "backup_master_results.csv")
+
+    timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    first_day_status = "제거(True)" if drop_failure_day else "포함(False)"
+
+    row_data = {
+        'Timestamp': timestamp_str,
+        'Model': model_name.upper(),
+        '데이터': os.path.basename(dataset_name),
+        '불균형 처리': imbalance_strategy,
+        '첫날포함여부': first_day_status,
+        'Row Precision': round(float(row_metrics.get('precision', 0.0)), 4),
+        'Row Recall': round(float(row_metrics.get('recall', 0.0)), 4),
+        'Row F1': round(float(row_metrics.get('f1', 0.0)), 4),
+        'Row PR-AUC': round(float(row_metrics.get('pr_auc', 0.0)), 4),
+        'Row FAR (%)': round(float(row_metrics.get('far', 0.0)) * 100, 2),
+        'Threshold': round(float(disk_metrics.get('threshold', 0.5)), 4),
+        'Disk-level Precision': round(float(disk_metrics.get('precision', 0.0)), 4),
+        'Disk-level Recall': round(float(disk_metrics.get('recall', 0.0)), 4),
+        'F1-score': round(float(disk_metrics.get('f1', 0.0)), 4),
+        'Disk-level FAR (%)': round(float(disk_metrics.get('far', 0.0)) * 100, 2),
+        'Median Lead Time': round(float(disk_metrics.get('median_lead_time', 0.0)), 2),
+        'EDR@15': round(float(disk_metrics.get('edr_15', 0.0)), 4)
+    }
+
+    df_row = pd.DataFrame([row_data])
+
+    # 1. Try to sync any previous pending backup rows first
+    if os.path.exists(backup_csv_path) and os.path.exists(master_csv_path):
+        try:
+            df_backup = pd.read_csv(backup_csv_path, encoding='utf-8-sig')
+            df_backup.to_csv(master_csv_path, mode='a', header=False, index=False, encoding='utf-8-sig')
+            os.remove(backup_csv_path)
+            print(f"[Auto-Sync] Restored and synced pending backup results to master CSV -> {master_csv_path}")
+        except Exception:
+            pass  # Master CSV might still be locked
+
+    # 2. Try writing current row to master_experiment_results.csv
+    try:
+        file_exists = os.path.exists(master_csv_path)
+        df_row.to_csv(master_csv_path, mode='a', header=not file_exists, index=False, encoding='utf-8-sig')
+        print("\n" + "="*80)
+        print(f"[MASTER LOG] PERMANENT MASTER EXPERIMENT LOG APPENDED -> {master_csv_path}")
+        print("="*80)
+        print(df_row.to_string(index=False))
+        print("="*80 + "\n")
+    except PermissionError:
+        # Fallback: Save to backup_master_results.csv with UTF-8-SIG encoding so data/encoding is NEVER corrupted!
+        backup_exists = os.path.exists(backup_csv_path)
+        df_row.to_csv(backup_csv_path, mode='a', header=not backup_exists, index=False, encoding='utf-8-sig')
+        print("\n" + "="*80)
+        print(f"[SAFE-GUARD BACKUP] master_experiment_results.csv is currently LOCKED by Excel.")
+        print(f"  -> Saved current experiment result with UTF-8 BOM encoding to BACKUP file: {backup_csv_path}")
+        print(f"  -> It will automatically merge into master_experiment_results.csv on the next run once Excel is closed.")
+        print("="*80)
+        print(df_row.to_string(index=False))
+        print("="*80 + "\n")
+
+    return df_row

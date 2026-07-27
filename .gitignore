@@ -13,10 +13,16 @@ __pycache__/
 .ipynb_checkpoints/
 .pytest_cache/
 
-# Large Datasets (Ignore all parquet files)
+# Large Datasets & Resampled Cache (Ignore heavy files but track directory via .gitkeep)
 *.parquet
 data/**/*.parquet
 data/model=*/**/*.parquet
+*.npz
+data/resampled_cache/*
+!data/resampled_cache/.gitkeep
+
+# Temporary Safe-guard Excel Backups
+results/backup_master_results.csv
 
 # Local User Configurations / Editor settings
 .vscode/
