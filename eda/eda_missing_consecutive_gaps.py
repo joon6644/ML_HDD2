@@ -14,7 +14,7 @@ def parse_arguments():
     parser.add_argument(
         "--models", 
         nargs="+", 
-        choices=["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"],
+        choices=["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"],
         help="분석을 수행할 하나 이상의 모델명을 지정합니다. 생략하면 전체 모델이 분석됩니다."
     )
     parser.add_argument(
@@ -30,6 +30,7 @@ def main():
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
+    raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
     if args.file:
@@ -37,8 +38,8 @@ def main():
         model = os.path.splitext(filename)[0]
         targets = [(model, args.file)]
     else:
-        selected_models = args.models if args.models else ["ST12000NM0007"]
-        targets = [(model, os.path.join(data_dir, f"{model}.parquet")) for model in selected_models]
+        selected_models = args.models if args.models else ["ST12000NM0007_corrected"]
+        targets = [(model, os.path.join(raw_dir, f"{model}.parquet")) for model in selected_models]
         
     print(f"\n분석을 진행할 파일 대상: {targets}")
     

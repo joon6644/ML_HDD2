@@ -7,7 +7,7 @@ import pandas as pd
 
 def parse_arguments():
     """명령줄 인자를 파싱합니다."""
-    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
+    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"]
     
     parser = argparse.ArgumentParser(description="중복 행 및 시계열 빈 날짜(공백) 건수 계산 스크립트")
     parser.add_argument(
@@ -29,6 +29,8 @@ def main():
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
+    preprocessed_dir = os.path.join(data_dir, "preprocessed")
+    raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
     if args.file:
@@ -36,8 +38,8 @@ def main():
         model = os.path.splitext(filename)[0]
         targets = [(model, args.file)]
     else:
-        selected_models = args.models if args.models else ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
-        targets = [(model, os.path.join(data_dir, f"{model}.parquet")) for model in selected_models]
+        selected_models = args.models if args.models else ["ST12000NM0007_preprocessed"]
+        targets = [(model, os.path.join(preprocessed_dir, f"{model}.parquet")) for model in selected_models]
     
     con = duckdb.connect(database=":memory:")
     

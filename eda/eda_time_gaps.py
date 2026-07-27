@@ -10,7 +10,7 @@ import seaborn as sns
 
 def get_selected_models():
     """분석할 모델 리스트를 결정합니다 (명령줄 인자 또는 대화형 메뉴)."""
-    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
+    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"]
     
     parser = argparse.ArgumentParser(description="모델별 시계열 공백 개체 수 및 기간 분포 분석 스크립트")
     parser.add_argument(
@@ -57,6 +57,7 @@ def main():
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
+    raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
     con = duckdb.connect(database=":memory:")
@@ -71,7 +72,7 @@ def main():
         print(f"모델 분석 시작: {model}")
         print("=" * 70)
         
-        file_path = os.path.join(data_dir, f"{model}.parquet")
+        file_path = os.path.join(raw_dir, f"{model}.parquet")
         output_dir = os.path.join(eda_dir, model)
         
         if not os.path.exists(file_path):

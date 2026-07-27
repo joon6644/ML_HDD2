@@ -7,7 +7,7 @@ import pandas as pd
 
 def get_selected_models():
     """명령줄 인자(CLI arguments) 또는 대화형 입력을 기반으로 실행할 모델 리스트를 결정합니다."""
-    models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
+    models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"]
     
     # 1. 명령줄 인자 파싱
     parser = argparse.ArgumentParser(description="컬럼별 결측치 비율을 계산하고 CSV 보고서로 저장합니다.")
@@ -32,8 +32,8 @@ def get_selected_models():
         print("  4. 전체 모델 실행")
         print("=" * 60)
         try:
-            choice = input("분석할 모델을 선택하세요 (예: 1,3 또는 4) [기본값: 4]: ").strip()
-            if not choice or choice == "4":
+            choice = input("분석할 모델을 선택하세요 (예: 1,3 또는 4) [기본값: 0]: ").strip()
+            if not choice or choice == "0":
                 return models
             
             selected = []
@@ -58,6 +58,7 @@ def main():
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
+    raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
     con = duckdb.connect(database=":memory:")
@@ -67,7 +68,7 @@ def main():
         print(f"모델 처리 중: {model}")
         print("=" * 70)
         
-        file_path = os.path.join(data_dir, f"{model}.parquet")
+        file_path = os.path.join(raw_dir, f"{model}.parquet")
         output_dir = os.path.join(eda_dir, model)
         
         if not os.path.exists(file_path):

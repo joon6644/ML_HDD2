@@ -23,12 +23,14 @@ def main():
     
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(project_dir, "data")
+    raw_dir = os.path.join(data_dir, "raw")
+    processed_dir = os.path.join(data_dir, "processed")
     tmp_dir = os.path.join(project_dir, ".tmp")
     os.makedirs(tmp_dir, exist_ok=True)
     
-    input_file = os.path.join(data_dir, f"{model}.parquet")
-    output_file = os.path.join(data_dir, f"{model}_preprocessed.parquet")
-    temp_output_file = os.path.join(data_dir, f"{model}_preprocessed_temp.parquet")
+    input_file = os.path.join(raw_dir, f"{model}.parquet")
+    output_file = os.path.join(processed_dir, f"{model}_preprocessed.parquet")
+    temp_output_file = os.path.join(tmp_dir, f"{model}_preprocessed_temp.parquet")
     db_file = os.path.join(tmp_dir, f"preprocess_{model}.db")
     
     if not os.path.exists(input_file):
