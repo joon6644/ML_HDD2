@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 import pickle
 import numpy as np
@@ -107,9 +108,9 @@ def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, v
     val_path = os.path.join(output_dir, f"{model_name}_val.parquet")
     test_path = os.path.join(output_dir, f"{model_name}_test.parquet")
     
-    train_df.to_parquet(train_path, index=False)
-    val_df.to_parquet(val_path, index=False)
-    test_df.to_parquet(test_path, index=False)
+    train_df.to_parquet(train_path, index=False, compression='zstd')
+    val_df.to_parquet(val_path, index=False, compression='zstd')
+    test_df.to_parquet(test_path, index=False, compression='zstd')
     
     # 통계 출력
     def _stats(name, d):
@@ -124,10 +125,57 @@ def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, v
     print("\nSplitting and saving completed successfully!")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Stratified group splitting tool by serial_number")
-    parser.add_argument("--input", type=str, default=r"data/preprocessed/ST12000NM0007_preprocessed.parquet", help="Path to input preprocessed parquet file")
-    parser.add_argument("--output_dir", type=str, default=r"data/splitted/ST12000NM0007", help="Directory to save splitted parquets")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed for group stratified splitting")
-    args = parser.parse_args()
+    MODELS = [
+        "HGST_20HUH721212ALN604",
+        "TOSHIBA_20MG07ACA14TA",
+        "ST12000NM0007"
+    ]
     
-    split_and_save(args.input, args.output_dir, seed=args.seed)
+    parser = argparse.ArgumentParser(description="Stratified group splitting tool by serial_number")
+    parser.add_argument("--model", type=str, choices=MODELS + ["ALL"], help="Model name to split")
+    parser.add_argument("--input", type=str, help="Custom path to input preprocessed parquet file")
+    parser.add_argument("--output_dir", type=str, help="Custom directory to save splitted parquets")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for group stratified splitting")
+    args, _ = parser.parse_known_args()
+    
+    target_model = args.model
+    
+    # CLI 인자가 주어지지 않고 직접 실행한 경우 대화형 메뉴 출력
+    if not target_model and not args.input and sys.stdin.isatty():
+        print("=" * 60)
+        print("   데이터셋 층화 분할 (Train/Val/Test Split) - 모델 선택")
+        print("=" * 60)
+        for idx, m in enumerate(MODELS, 1):
+            print(f"  {idx}. {m}")
+        print(f"  4. 전체 모델 실행 (ALL)")
+        print("=" * 60)
+        
+        try:
+            choice = input("분할할 모델의 번호를 선택하세요 (1~4): ").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(MODELS):
+                    target_model = MODELS[idx]
+                elif idx == 3:
+                    target_model = "ALL"
+        except Exception:
+            pass
+
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
+    if args.input and args.output_dir:
+        split_and_save(args.input, args.output_dir, seed=args.seed)
+    else:
+        selected_models = MODELS if target_model == "ALL" or not target_model else [target_model]
+        for m in selected_models:
+            input_path = os.path.join(project_dir, "data", "preprocessed", f"{m}_preprocessed.parquet")
+            output_dir = os.path.join(project_dir, "data", "splitted", m)
+            
+            if not os.path.exists(input_path):
+                print(f"\n[오류] 전처리된 입력 파일이 존재하지 않습니다: {input_path}")
+                continue
+                
+            print(f"\n============================================================")
+            print(f" [{m}] 층화 분할 작업 시작")
+            print(f"============================================================")
+            split_and_save(input_path, output_dir, seed=args.seed)

@@ -5,52 +5,64 @@ import time
 import duckdb
 import pandas as pd
 
-def parse_arguments():
-    """명령줄 인자를 파싱합니다."""
-    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"]
+def get_selected_model():
+    """사용자가 분석할 단 하나의 모델 데이터셋을 지정하게 합니다."""
+    all_models = ["HGST_20HUH721212ALN604", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
     
     parser = argparse.ArgumentParser(description="중복 행 및 시계열 빈 날짜(공백) 건수 계산 스크립트")
-    parser.add_argument(
-        "--models", 
-        nargs="+", 
-        choices=all_models,
-        help="분석을 수행할 하나 이상의 모델명을 지정합니다. 생략하면 전체 모델이 분석됩니다."
-    )
-    parser.add_argument(
-        "--file",
-        type=str,
-        help="분석할 특정 Parquet 파일 경로 지정. 지정할 경우 해당 파일의 이름을 기준으로 EDA 결과 폴더가 생성됩니다."
-    )
-    args, unknown = parser.parse_known_args()
-    return args
+    parser.add_argument("--model", choices=all_models, help="분석할 모델명 지정")
+    parser.add_argument("--models", nargs="+", choices=all_models, help="분석할 모델 리스트")
+    parser.add_argument("--file", type=str, help="특정 Parquet 파일 경로")
+    args, _ = parser.parse_known_args()
+    
+    if args.file:
+        return None, args.file
+    if args.model:
+        return args.model, None
+    if args.models and len(args.models) > 0:
+        return args.models[0], None
+        
+    if sys.stdin.isatty():
+        print("=" * 60)
+        print("   중복 행 및 시계열 공백 분석 - 모델 선택")
+        print("=" * 60)
+        for i, model in enumerate(all_models, 1):
+            print(f"  {i}. {model}")
+        print("=" * 60)
+        try:
+            choice = input("분석할 모델의 번호를 선택하세요 (1~3): ").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(all_models):
+                    return all_models[idx], None
+        except Exception:
+            pass
+            
+    return all_models[0], None
 
 def main():
-    args = parse_arguments()
+    model, custom_file = get_selected_model()
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
-    preprocessed_dir = os.path.join(data_dir, "preprocessed")
     raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
-    if args.file:
-        filename = os.path.basename(args.file)
+    if custom_file:
+        filename = os.path.basename(custom_file)
         model = os.path.splitext(filename)[0]
-        targets = [(model, args.file)]
+        file_path = custom_file
     else:
-        selected_models = args.models if args.models else ["ST12000NM0007_preprocessed"]
-        targets = [(model, os.path.join(preprocessed_dir, f"{model}.parquet")) for model in selected_models]
+        file_path = os.path.join(raw_dir, f"{model}.parquet")
+        
+    targets = [(model, file_path)]
     
     con = duckdb.connect(database=":memory:")
     
-    print("\n" + "=" * 70)
-    print("중복 행 및 시계열 공백 터미널 분석 시작")
-    print("=" * 70)
-    
     for model, file_path in targets:
-        print("\n" + "-" * 70)
-        print(f"모델 분석 진행 중: {model}")
-        print("-" * 70)
+        print("\n" + "=" * 70)
+        print(f"중복 행 및 시계열 공백 분석 시작: {model}")
+        print("=" * 70)
         
         output_dir = os.path.join(eda_dir, model)
         

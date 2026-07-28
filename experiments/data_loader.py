@@ -26,21 +26,28 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
     if not os.path.exists(splitted_dir):
         raise FileNotFoundError(f"Dataset directory does not exist: '{splitted_dir}'")
 
-    # Discover train, val, test parquet files
-    files = os.listdir(splitted_dir)
-    train_file = next((f for f in files if f.endswith('_train.parquet') or f == 'train.parquet'), None)
-    val_file = next((f for f in files if f.endswith('_val.parquet') or f == 'val.parquet'), None)
-    test_file = next((f for f in files if f.endswith('_test.parquet') or f == 'test.parquet'), None)
+    # Discover train, val, test parquet files (sorted for deterministic selection
+    # if a directory ever ends up with more than one file matching a pattern)
+    files = sorted(os.listdir(splitted_dir))
+    train_candidates = [f for f in files if f.endswith('_train.parquet') or f == 'train.parquet']
+    val_candidates = [f for f in files if f.endswith('_val.parquet') or f == 'val.parquet']
+    test_candidates = [f for f in files if f.endswith('_test.parquet') or f == 'test.parquet']
 
-    if not train_file or not val_file:
+    if not train_candidates or not val_candidates or not test_candidates:
         raise FileNotFoundError(
-            f"Could not find valid *_train.parquet and *_val.parquet files in '{splitted_dir}'. "
+            f"Could not find valid *_train.parquet, *_val.parquet, and *_test.parquet files in '{splitted_dir}'. "
+            f"A distinct test set is required to avoid evaluating on the same data used for threshold tuning. "
             f"Directory contains: {files}"
         )
+    for name, candidates in [("train", train_candidates), ("val", val_candidates), ("test", test_candidates)]:
+        if len(candidates) > 1:
+            print(f"[Warning] Multiple candidate {name} files found in '{splitted_dir}': {candidates}. "
+                  f"Using '{candidates[0]}' (alphabetically first) for determinism.")
 
+    train_file, val_file, test_file = train_candidates[0], val_candidates[0], test_candidates[0]
     train_path = os.path.join(splitted_dir, train_file)
     val_path = os.path.join(splitted_dir, val_file)
-    test_path = os.path.join(splitted_dir, test_file) if test_file else val_path
+    test_path = os.path.join(splitted_dir, test_file)
 
     print(f"Loading datasets from: {splitted_dir}")
     train_df = pd.read_parquet(train_path)

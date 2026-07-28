@@ -1,5 +1,3 @@
-# Git Ignore File for 26_2_COIN Project
-
 # Virtual Environment
 .venv/
 venv/
@@ -12,17 +10,24 @@ __pycache__/
 *$py.class
 .ipynb_checkpoints/
 .pytest_cache/
+.tmp/
 
-# Large Datasets & Resampled Cache (Ignore heavy files but track directory via .gitkeep)
+# Model Checkpoints (Ignore heavy .ckpt files, track directory structure via .gitkeep)
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Large Datasets & Resampled Cache (Ignore heavy files, track directory structure via .gitkeep)
 *.parquet
-data/**/*.parquet
-data/model=*/**/*.parquet
 *.npz
+data/raw/*
+data/preprocessed/*
+data/splitted/*
 data/resampled_cache/*
-!data/resampled_cache/.gitkeep
+!data/**/*.gitkeep
 
-# Temporary Safe-guard Excel Backups
+# Experiment Results (Ignore backup excel copies, track directory structure via .gitkeep)
 results/backup_master_results.csv
+!results/.gitkeep
 
 # Local User Configurations / Editor settings
 .vscode/

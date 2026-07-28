@@ -5,56 +5,41 @@ import time
 import duckdb
 import pandas as pd
 
-def get_selected_models():
-    """명령줄 인자(CLI arguments) 또는 대화형 입력을 기반으로 실행할 모델 리스트를 결정합니다."""
-    models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007", "ST12000NM0007_corrected"]
+def get_selected_model():
+    """사용자가 분석할 단 하나의 모델 데이터셋을 지정하게 합니다."""
+    all_models = ["HGST_20HUH721212ALN604", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
     
-    # 1. 명령줄 인자 파싱
     parser = argparse.ArgumentParser(description="컬럼별 결측치 비율을 계산하고 CSV 보고서로 저장합니다.")
-    parser.add_argument(
-        "--models", 
-        nargs="+", 
-        choices=models,
-        help="분석을 수행할 하나 이상의 모델명을 지정합니다. 생략하면 대화형 프롬프트가 실행되거나 전체 모델이 분석됩니다."
-    )
-    args, unknown = parser.parse_known_args()
+    parser.add_argument("--model", choices=all_models, help="분석할 모델명 지정")
+    parser.add_argument("--models", nargs="+", choices=all_models, help="분석할 모델 리스트")
+    args, _ = parser.parse_known_args()
     
-    if args.models:
-        return args.models
+    if args.model:
+        return args.model
+    if args.models and len(args.models) > 0:
+        return args.models[0]
         
-    # 2. 터미널이 대화형 입력을 지원하는 경우 선택 메뉴 표시
     if sys.stdin.isatty():
         print("=" * 60)
-        print("   결측치 비율 분석 - 모델 선택 메뉴")
+        print("   컬럼별 결측치 비율 분석 - 모델 선택")
         print("=" * 60)
-        for i, model in enumerate(models, 1):
+        for i, model in enumerate(all_models, 1):
             print(f"  {i}. {model}")
-        print("  4. 전체 모델 실행")
         print("=" * 60)
         try:
-            choice = input("분석할 모델을 선택하세요 (예: 1,3 또는 4) [기본값: 0]: ").strip()
-            if not choice or choice == "0":
-                return models
-            
-            selected = []
-            for part in choice.split(","):
-                part = part.strip()
-                if part.isdigit():
-                    idx = int(part) - 1
-                    if 0 <= idx < len(models):
-                        selected.append(models[idx])
-            
-            if selected:
-                return selected
+            choice = input("분석할 모델의 번호를 선택하세요 (1~3): ").strip()
+            if choice.isdigit():
+                idx = int(choice) - 1
+                if 0 <= idx < len(all_models):
+                    return all_models[idx]
         except Exception:
             pass
             
-    # 3. 비대화형 환경이거나 입력에 실패했을 경우 전체 모델을 기본값으로 반환
-    return models
+    return all_models[0]
 
 def main():
-    selected_models = get_selected_models()
-    print(f"\n분석을 진행할 모델: {selected_models}")
+    model = get_selected_model()
+    selected_models = [model]
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
@@ -65,7 +50,7 @@ def main():
     
     for model in selected_models:
         print("\n" + "=" * 70)
-        print(f"모델 처리 중: {model}")
+        print(f"컬럼별 결측치 비율 분석 시작: {model}")
         print("=" * 70)
         
         file_path = os.path.join(raw_dir, f"{model}.parquet")

@@ -18,6 +18,9 @@ class GRUClass(nn.Module):
     def __init__(self, input_dim: int, hidden_dim: int = 64, num_layers: int = 2, dropout: float = 0.2):
         super(GRUClass, self).__init__()
         self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout = dropout
         self.gru = nn.GRU(input_dim, hidden_dim, num_layers, batch_first=True, dropout=dropout if num_layers > 1 else 0)
         self.fc = nn.Sequential(
             nn.Linear(hidden_dim, 32),

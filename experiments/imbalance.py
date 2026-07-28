@@ -335,7 +335,7 @@ class ADASYNHandler(BaseImbalanceHandler):
 # ------------------------------------------------------------------------------
 class EasyEnsembleHandler(BaseImbalanceHandler):
     """Strategy 5: EasyEnsemble bagging sampler (Liu et al., 2009)."""
-    def __init__(self, n_estimators: int = 10, seed: int = None):
+    def __init__(self, n_estimators: int = 5, seed: int = None):
         super().__init__(seed=seed)
         self.n_estimators = n_estimators
 
@@ -484,12 +484,16 @@ def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_
     # Determine dimension (2D Tabular vs 3D Sequence) - robustly handle Tensor, LazySequenceTensor and ndarray
     if torch is not None and isinstance(X, torch.Tensor):
         is_seq = X.dim() == 3
+        expected_n_features = X.shape[-1]
     elif hasattr(X, 'valid_indices') and hasattr(X, 'X_raw'):
         is_seq = True  # LazySequenceTensor from data_loader.py is always a 3D (N, window, features) sequence
+        expected_n_features = X.X_raw.shape[1]
     elif hasattr(X, 'ndim'):
         is_seq = X.ndim == 3
+        expected_n_features = X.shape[-1] if hasattr(X, 'shape') else None
     else:
         is_seq = False
+        expected_n_features = None
 
     # 2. Check Disk Cache for Heavy Resampling Strategies
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -507,10 +511,15 @@ def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_
             cached_data = np.load(cache_path)
             X_resampled = cached_data['X'].astype(np.float32)
             y_resampled = cached_data['y'].astype(np.float32)
+            if expected_n_features is not None and X_resampled.shape[-1] != expected_n_features:
+                raise ValueError(
+                    f"Cached feature width {X_resampled.shape[-1]} does not match the current feature "
+                    f"width {expected_n_features} (config.EXCLUDE_COLS or dataset schema changed?)."
+                )
             print(f"  -> Cache loaded instantly! Shape: {X_resampled.shape} (Pos: {int(np.sum(y_resampled==1)):,}, Neg: {int(np.sum(y_resampled==0)):,})\n")
             return X_resampled, y_resampled
         except Exception as e:
-            print(f"[Corrupted Cache Warning] Cached file corrupted ({e}). Recomputing...")
+            print(f"[Corrupted/Stale Cache Warning] Cached file invalid ({e}). Recomputing...")
             try:
                 os.remove(cache_path)
             except Exception:

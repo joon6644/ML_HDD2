@@ -91,7 +91,8 @@ def main():
         X_test_2d = test_df[features].values
 
     # 3. Train Model (Check Checkpoint First)
-    cached_model = load_checkpoint(args.model, args.imbalance, args.seed, args.lead_time, args.data, input_dim=len(features), extra_tag=ckpt_tag)
+    ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
+    cached_model = load_checkpoint(args.model, args.imbalance, args.seed, args.lead_time, args.data, input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size)
     if cached_model is not None:
         model = cached_model
         model_type = 'ensemble' if args.imbalance == 'easyensemble' else ('pytorch_class' if is_sequence_model or args.model == 'mlp' else args.model)
@@ -157,7 +158,7 @@ def main():
                     model_type = 'pytorch_class'
 
         # Save checkpoint immediately after training
-        save_checkpoint(model, args.model, args.imbalance, args.seed, args.lead_time, args.data, extra_tag=ckpt_tag)
+        save_checkpoint(model, args.model, args.imbalance, args.seed, args.lead_time, args.data, extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size)
 
     # 3. Perform Inference & Evaluation (ALWAYS BOTH)
     print("\n[Step 3] Running Full Inference & Evaluation (Row-Level + Disk-Level)...")

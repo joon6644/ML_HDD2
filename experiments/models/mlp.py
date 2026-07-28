@@ -18,6 +18,9 @@ class MLPClass(nn.Module):
     def __init__(self, input_dim: int, hidden_dim1: int = 64, hidden_dim2: int = 32, dropout: float = 0.2):
         super(MLPClass, self).__init__()
         self.input_dim = input_dim
+        self.hidden_dim1 = hidden_dim1
+        self.hidden_dim2 = hidden_dim2
+        self.dropout = dropout
         self.net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim1),
             nn.ReLU(),

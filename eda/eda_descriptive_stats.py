@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 
 def get_selected_model():
     """사용자가 분석할 단 하나의 모델 데이터셋을 지정하게 합니다."""
-    all_models = ["TOSHIBA_20MG08ACA16TA", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
+    all_models = ["HGST_20HUH721212ALN604", "TOSHIBA_20MG07ACA14TA", "ST12000NM0007"]
     
     # 1. 명령줄 인자 파싱
     parser = argparse.ArgumentParser(description="지정된 모델의 전체 데이터를 사용하여 SMART Raw 컬럼별 기술통계량 계산 및 분포/사분위수 통합 시각화를 수행합니다.")
@@ -49,9 +49,10 @@ def main():
     
     project_dir = r"C:\Workspace\projects\26_2_COIN"
     data_dir = os.path.join(project_dir, "data")
+    raw_dir = os.path.join(data_dir, "raw")
     eda_dir = os.path.join(project_dir, "EDA")
     
-    file_path = os.path.join(data_dir, f"{model}.parquet")
+    file_path = os.path.join(raw_dir, f"{model}.parquet")
     output_dir = os.path.join(eda_dir, model)
     os.makedirs(output_dir, exist_ok=True)
     

@@ -24,7 +24,8 @@ def main():
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(project_dir, "data")
     raw_dir = os.path.join(data_dir, "raw")
-    processed_dir = os.path.join(data_dir, "processed")
+    processed_dir = os.path.join(data_dir, "preprocessed")
+    os.makedirs(processed_dir, exist_ok=True)
     tmp_dir = os.path.join(project_dir, ".tmp")
     os.makedirs(tmp_dir, exist_ok=True)
     
@@ -66,7 +67,7 @@ def main():
         # 6. 임시 데이터셋 Parquet로 먼저 저장 (이후 검증의 속도 단축을 위함)
         print(f"\n[Step 6] 임시 preprocessed 파일 저장 중 (1차 스캔 및 저장): {temp_output_file}")
         t0 = time.time()
-        con.execute(f"COPY final_preprocessed TO '{temp_output_file.replace('\\', '/')}' (FORMAT PARQUET)")
+        con.execute(f"COPY final_preprocessed TO '{temp_output_file.replace('\\', '/')}' (FORMAT PARQUET, COMPRESSION ZSTD)")
         print(f"  - 저장 완료 (소요시간: {time.time() - t0:.2f}초)")
         
         # 7. 중복 컬럼 검증
@@ -116,7 +117,7 @@ def main():
                 COPY (
                     SELECT {final_cols_str} 
                     FROM read_parquet('{temp_output_file.replace('\\', '/')}')
-                ) TO '{output_file.replace('\\', '/')}' (FORMAT PARQUET)
+                ) TO '{output_file.replace('\\', '/')}' (FORMAT PARQUET, COMPRESSION ZSTD)
             """)
             print(f"  - 최종 저장 완료 (소요시간: {time.time() - t_final:.2f}초)")
             
