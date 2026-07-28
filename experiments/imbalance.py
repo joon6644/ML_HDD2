@@ -48,16 +48,35 @@ class EasyEnsembleModelWrapper:
         self.device = torch.device(device) if (torch is not None and isinstance(device, (str, torch.device))) else None
 
     def predict_proba(self, X):
+        is_lazy_seq = hasattr(X, 'valid_indices') and hasattr(X, 'X_raw')  # LazySequenceTensor
         probs_list = []
         for model in self.models:
             if torch is not None and (isinstance(model, torch.nn.Module) or self.is_pytorch):
+                # Detect model's actual device if possible
+                try:
+                    dev = next(model.parameters()).device
+                except Exception:
+                    dev = self.device if self.device is not None else torch.device('cpu')
+
                 model.eval()
                 with torch.no_grad():
-                    if not isinstance(X, torch.Tensor):
-                        X_t = torch.tensor(X, dtype=torch.float32, device=self.device)
+                    if is_lazy_seq or isinstance(X, torch.Tensor):
+                        # Chunk to avoid materializing a huge sequence tensor all at once
+                        chunk_size = 65536
+                        out_chunks = []
+                        for i in range(0, len(X), chunk_size):
+                            x_chunk = X[i:i + chunk_size]
+                            x_chunk = x_chunk.to(dev) if isinstance(x_chunk, torch.Tensor) else torch.tensor(x_chunk, dtype=torch.float32, device=dev)
+                            out_chunks.append(model(x_chunk))
+                        out = torch.cat(out_chunks, dim=0)
                     else:
-                        X_t = X.to(self.device)
-                    p = torch.sigmoid(model(X_t)).cpu().numpy().flatten()
+                        X_t = torch.tensor(X, dtype=torch.float32, device=dev)
+                        out = model(X_t)
+                    # Handle raw logits output vs predicted probs
+                    if out.ndim > 1 and out.shape[1] == 2:
+                        p = torch.softmax(out, dim=1)[:, 1].cpu().numpy().flatten()
+                    else:
+                        p = torch.sigmoid(out).cpu().numpy().flatten()
             elif hasattr(model, 'predict_proba'):
                 p = model.predict_proba(X)[:, 1]
             elif hasattr(model, 'predict'):
@@ -103,7 +122,10 @@ class BaseImbalanceHandler:
 class NoneImbalanceHandler(BaseImbalanceHandler):
     """Strategy 1: Raw data without any resampling or class weight."""
     def process(self, X, y):
-        pos_count = int(np.sum(y == 1))
+        if torch is not None and isinstance(y, torch.Tensor):
+            pos_count = int((y == 1).sum().item())
+        else:
+            pos_count = int(np.sum(np.asarray(y) == 1))
         total_count = len(y)
         print(f"[Imbalance: None] Using raw dataset (Pos: {pos_count:,} / Total: {total_count:,} | Pos ratio: {pos_count/total_count:.4%})")
         return X, y
@@ -118,8 +140,14 @@ class UndersamplingHandler(BaseImbalanceHandler):
         self.ratio = ratio
 
     def process(self, X, y):
-        pos_idx = np.where(y == 1)[0]
-        neg_idx = np.where(y == 0)[0]
+        # Handle PyTorch Tensor y
+        if torch is not None and isinstance(y, torch.Tensor):
+            y_np = y.cpu().numpy()
+        else:
+            y_np = np.asarray(y)
+        
+        pos_idx = np.where(y_np == 1)[0]
+        neg_idx = np.where(y_np == 0)[0]
         n_pos = len(pos_idx)
         n_neg_sample = int(n_pos * self.ratio)
         
@@ -133,7 +161,7 @@ class UndersamplingHandler(BaseImbalanceHandler):
             resampled_X = X.iloc[resampled_idx]
         else:
             resampled_X = X[resampled_idx]
-        resampled_y = y[resampled_idx]
+        resampled_y = y_np[resampled_idx]
         
         print(f"[Imbalance: Undersampling] Resampled shape: {resampled_X.shape} (Pos: {n_pos:,}, Neg: {n_neg_sample:,})")
         return resampled_X, resampled_y
@@ -146,8 +174,14 @@ class OversamplingHandler(BaseImbalanceHandler):
         self.ratio = ratio
 
     def process(self, X, y):
-        pos_idx = np.where(y == 1)[0]
-        neg_idx = np.where(y == 0)[0]
+        # Handle PyTorch Tensor y
+        if torch is not None and isinstance(y, torch.Tensor):
+            y_np = y.cpu().numpy()
+        else:
+            y_np = np.asarray(y)
+        
+        pos_idx = np.where(y_np == 1)[0]
+        neg_idx = np.where(y_np == 0)[0]
         n_neg = len(neg_idx)
         n_pos_target = int(n_neg * self.ratio)
         
@@ -161,7 +195,7 @@ class OversamplingHandler(BaseImbalanceHandler):
             resampled_X = X.iloc[resampled_idx]
         else:
             resampled_X = X[resampled_idx]
-        resampled_y = y[resampled_idx]
+        resampled_y = y_np[resampled_idx]
         
         print(f"[Imbalance: Oversampling] Resampled shape: {resampled_X.shape} (Pos: {n_pos_target:,}, Neg: {n_neg:,})")
         return resampled_X, resampled_y
@@ -306,12 +340,46 @@ class EasyEnsembleHandler(BaseImbalanceHandler):
         self.n_estimators = n_estimators
 
     def generate_subsets(self, X, y):
-        pos_idx = np.where(y == 1)[0]
-        neg_idx = np.where(y == 0)[0]
+        """
+        Build K balanced subsets without ever materialising the full sequence tensor.
+        Explicitly handles LazySequenceTensor from data_loader.py (the common LSTM/GRU case).
+        Works for: LazySequenceTensor, torch.Tensor, numpy ndarray, pandas DataFrame/Series.
+        """
+        is_tensor = torch is not None and isinstance(y, torch.Tensor)
+        is_lazy = hasattr(X, 'valid_indices') and hasattr(X, 'X_raw')  # LazySequenceTensor
+
+        # --- Build index arrays (CPU numpy) ---
+        if is_tensor:
+            y_cpu = y.cpu()
+            pos_idx = (y_cpu == 1).nonzero(as_tuple=True)[0].numpy()
+            neg_idx = (y_cpu == 0).nonzero(as_tuple=True)[0].numpy()
+        elif hasattr(y, 'values'):
+            pos_idx = np.where(y.values == 1)[0]
+            neg_idx = np.where(y.values == 0)[0]
+        else:
+            y_arr = np.asarray(y)
+            pos_idx = np.where(y_arr == 1)[0]
+            neg_idx = np.where(y_arr == 0)[0]
+
         n_pos = len(pos_idx)
-        
-        X_np = X.values if hasattr(X, 'values') else np.array(X)
-        y_np = y.values if hasattr(y, 'values') else np.array(y)
+
+        def _slice(arr, idx):
+            """
+            Slice arr at idx positions. Never materializes the full array.
+            LazySequenceTensor: builds only the requested subset sequences on-the-fly.
+            torch.Tensor: fancy indexing on the existing tensor.
+            DataFrame/numpy: direct fancy indexing on the small subset.
+            """
+            idx_t = torch.from_numpy(idx).long()
+            if hasattr(arr, 'valid_indices') and hasattr(arr, 'X_raw'):
+                # LazySequenceTensor: __getitem__ builds only these sequences on-demand
+                return arr[idx_t]
+            elif torch is not None and isinstance(arr, torch.Tensor):
+                return arr[idx_t]
+            elif hasattr(arr, 'iloc'):
+                return arr.iloc[idx]
+            else:
+                return np.asarray(arr)[idx]
 
         subsets = []
         for i in range(self.n_estimators):
@@ -319,9 +387,15 @@ class EasyEnsembleHandler(BaseImbalanceHandler):
             sampled_neg_idx = sub_rng.choice(neg_idx, size=n_pos, replace=False)
             sub_idx = np.concatenate([pos_idx, sampled_neg_idx])
             sub_rng.shuffle(sub_idx)
-            subsets.append((X_np[sub_idx], y_np[sub_idx]))
-            
-        print(f"[Imbalance: EasyEnsemble] Generated {self.n_estimators} independent balanced subsets (K={self.n_estimators}, Pos: {n_pos:,}, Neg: {n_pos:,} per subset).")
+            X_sub = _slice(X, sub_idx)
+            y_sub = _slice(y, sub_idx)
+            print(f"  [EasyEnsemble] Subset {i+1}/{self.n_estimators} built: "
+                  f"shape={tuple(X_sub.shape)}, "
+                  f"Pos={int((y_sub==1).sum())}, Neg={int((y_sub==0).sum())}")
+            subsets.append((X_sub, y_sub))
+
+        print(f"[Imbalance: EasyEnsemble] Generated {self.n_estimators} independent balanced subsets "
+              f"(K={self.n_estimators}, Pos: {n_pos:,}, Neg: {n_pos:,} per subset).")
         return subsets
 
     def process(self, X, y):
@@ -333,7 +407,10 @@ class EasyEnsembleHandler(BaseImbalanceHandler):
 class ClassWeightHandler(BaseImbalanceHandler):
     """Strategy 6: Square-Root Dynamic Class Weighting (sqrt(N_neg / N_pos))."""
     def process(self, X, y):
-        pos_count = int(np.sum(y == 1))
+        if torch is not None and isinstance(y, torch.Tensor):
+            pos_count = int((y == 1).sum().item())
+        else:
+            pos_count = int(np.sum(np.asarray(y) == 1))
         neg_count = len(y) - pos_count
         raw_ratio = neg_count / pos_count if pos_count > 0 else 1.0
         sqrt_ratio = float(np.sqrt(raw_ratio))
@@ -376,14 +453,18 @@ def validate_config_compatibility(model_name: str, strategy: str):
         )
 
 
-def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_estimators: int = 10, dataset_path: str = None):
+def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_estimators: int = 10, dataset_path: str = None, lead_time: int = None, drop_failure_day: bool = None):
     """
     Modular factory function to apply imbalance handling with automatic Disk Caching.
-    Lookup & Save Rule: data/resampled_cache/{dataset_name}_{strategy}_seed{seed}.npz
+    Lookup & Save Rule: data/resampled_cache/{dataset_name}_{strategy}_seq{is_seq}_seed{seed}_lead{lead_time}_dropday{0|1}.npz
     """
     strategy = strategy.lower().strip()
     if seed is None:
         seed = config.SEED
+    if lead_time is None:
+        lead_time = config.TARGET_LEAD_TIME
+    if drop_failure_day is None:
+        drop_failure_day = config.DROP_FAILURE_DAY_IN_TRAIN
 
     # 1. Non-resampling strategies return raw inputs directly
     if strategy == 'none':
@@ -400,13 +481,23 @@ def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_
         dataset_path = config.DATASET_DIR
     dataset_name = os.path.basename(os.path.normpath(dataset_path))
 
+    # Determine dimension (2D Tabular vs 3D Sequence) - robustly handle Tensor, LazySequenceTensor and ndarray
+    if torch is not None and isinstance(X, torch.Tensor):
+        is_seq = X.dim() == 3
+    elif hasattr(X, 'valid_indices') and hasattr(X, 'X_raw'):
+        is_seq = True  # LazySequenceTensor from data_loader.py is always a 3D (N, window, features) sequence
+    elif hasattr(X, 'ndim'):
+        is_seq = X.ndim == 3
+    else:
+        is_seq = False
+
     # 2. Check Disk Cache for Heavy Resampling Strategies
-    # Rule: {dataset_name}_{strategy}_seed{seed}.npz
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cache_dir = os.path.join(project_root, "data", "resampled_cache")
     os.makedirs(cache_dir, exist_ok=True)
     
-    cache_filename = f"{dataset_name}_{strategy}_seed{seed}.npz"
+    seq_tag = "seq28_" if is_seq else "tab2d_"
+    cache_filename = f"{dataset_name}_{strategy}_{seq_tag}seed{seed}_lead{lead_time}_dropday{int(drop_failure_day)}.npz"
     cache_path = os.path.join(cache_dir, cache_filename)
 
     if os.path.exists(cache_path):
@@ -414,16 +505,31 @@ def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_
         print(f"  -> {cache_path}")
         try:
             cached_data = np.load(cache_path)
-            X_resampled = cached_data['X']
-            y_resampled = cached_data['y']
-            print(f"  -> Cache loaded instantly! Shape: {X_resampled.shape} (Pos: {np.sum(y_resampled==1):,}, Neg: {np.sum(y_resampled==0):,})\n")
+            X_resampled = cached_data['X'].astype(np.float32)
+            y_resampled = cached_data['y'].astype(np.float32)
+            print(f"  -> Cache loaded instantly! Shape: {X_resampled.shape} (Pos: {int(np.sum(y_resampled==1)):,}, Neg: {int(np.sum(y_resampled==0)):,})\n")
             return X_resampled, y_resampled
         except Exception as e:
-            print(f"⚠️ [Corrupted Cache Warning] Cached file is incomplete or corrupted ({e}). Deleting corrupted cache and recomputing...")
+            print(f"[Corrupted Cache Warning] Cached file corrupted ({e}). Recomputing...")
             try:
                 os.remove(cache_path)
             except Exception:
                 pass
+
+    # Guard: oversampling/smote/adasyn on 3D sequence data is memory-infeasible
+    # (Sequence oversampling would require replicating [N, 28, 20] tensors up to 500x)
+    if is_seq and strategy in ['oversampling', 'smote', 'adasyn']:
+        raise ValueError(
+            f"\n[Config Error] Strategy '{strategy.upper()}' is NOT supported for 3D sequence models (LSTM/GRU).\n"
+            f"  Reason: Oversampling {strategy} on 3D sequence data (N x 28 x 20) would require\n"
+            f"          replicating sequences to match the majority class (~130+ GB RAM).\n"
+            f"\n  Supported strategies for LSTM/GRU:\n"
+            f"    - 'none'          : Raw data (recommended baseline)\n"
+            f"    - 'class_weight'  : Weighted BCELoss (sqrt(N_neg/N_pos))\n"
+            f"    - 'focal_loss'    : Focal Loss (alpha=0.25, gamma=2.0)\n"
+            f"    - 'undersampling' : Reduce majority class (memory-efficient)\n"
+            f"    - 'easyensemble'  : K=10 bagging with balanced subsets\n"
+        )
 
     # 3. Compute Resampling if Cache Miss
     print(f"\n[Imbalance Cache Miss] Computing '{strategy.upper()}' resampling for dataset '{dataset_name}'...")
@@ -438,14 +544,22 @@ def apply_imbalance_treatment(X, y, strategy: str = 'none', seed: int = None, n_
     else:
         raise ValueError(f"Unknown imbalance strategy '{strategy}'. Supported: {SUPPORTED_STRATEGIES}")
 
-    # Convert to NumPy for saving
-    X_res_np = X_resampled.values if hasattr(X_resampled, 'values') else np.array(X_resampled)
-    y_res_np = y_resampled.values if hasattr(y_resampled, 'values') else np.array(y_resampled)
+    # Convert to float32 numpy for saving - handle Tensor, DataFrame, ndarray
+    def _to_float32_numpy(arr):
+        if torch is not None and isinstance(arr, torch.Tensor):
+            return arr.cpu().numpy().astype(np.float32)
+        elif hasattr(arr, 'values'):
+            return arr.values.astype(np.float32)
+        else:
+            return np.asarray(arr, dtype=np.float32)
 
-    # Save to Cache (Fast Uncompressed savez for 10x write speed)
-    print(f"[Imbalance Cache] Saving generated resampled dataset to cache:")
+    X_res_np = _to_float32_numpy(X_resampled)
+    y_res_np = _to_float32_numpy(y_resampled)
+
+    # Save to Cache
+    print(f"[Imbalance Cache] Saving resampled dataset to cache:")
     print(f"  -> {cache_path}")
     np.savez(cache_path, X=X_res_np, y=y_res_np)
-    print("  -> Disk cache save complete! Future runs with this strategy will load instantly in <1 second.\n")
+    print("  -> Disk cache save complete! Future runs will load instantly in <1 second.\n")
 
     return X_res_np, y_res_np

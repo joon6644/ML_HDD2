@@ -105,7 +105,8 @@ class LazySequenceTensor:
         global_idx = self.valid_indices[idx]
         offsets = torch.arange(-self.window_size + 1, 1, dtype=torch.long)
         idx_grid = global_idx.unsqueeze(1) + offsets.unsqueeze(0)
-        return self.X_raw[idx_grid]
+        # Use torch.index_select or direct view for zero-copy efficiency where possible
+        return torch.index_select(self.X_raw, 0, idx_grid.view(-1)).view(len(idx), self.window_size, -1)
 
     def size(self, dim=None):
         if dim == 0:

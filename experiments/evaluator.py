@@ -63,12 +63,13 @@ class RollingEvaluator:
     """
     Rolling Inference Evaluator for disk failure alert policies over daily time-series sequences.
     """
-    def __init__(self, model, features, window_size=None, device='cpu', model_type='sklearn'):
+    def __init__(self, model, features, window_size=None, device='cpu', model_type='sklearn', seed=None):
         self.model = model
         self.features = features
         self.window_size = window_size if window_size is not None else config.WINDOW_SIZE
         self.device = torch.device(device) if (torch is not None and isinstance(device, (str, torch.device))) else None
         self.model_type = model_type
+        self.seed = seed if seed is not None else config.SEED
         
         if torch is not None and self.model_type.startswith('pytorch') and hasattr(self.model, 'eval'):
             self.model.to(self.device)
@@ -95,7 +96,10 @@ class RollingEvaluator:
                 if preds.ndim > 1 and preds.shape[1] == 2:
                     preds = preds[:, 1]
             else:
-                preds = self.model(x_raw)
+                # Plain nn.Module (e.g. MLPClass) expects a float32 Tensor, not a raw ndarray
+                with torch.no_grad():
+                    x_t = torch.tensor(x_raw, dtype=torch.float32, device=self.device)
+                    preds = torch.sigmoid(self.model(x_t)).view(-1).cpu().numpy()
             return valid_dates, y_true, preds
 
         x_tensor = torch.tensor(x_raw, dtype=torch.float32, device=self.device)
@@ -122,8 +126,8 @@ class RollingEvaluator:
 
         serials = val_df['serial_number'].unique()
         if sample_size is not None and len(serials) > sample_size:
-            np.random.seed(config.SEED)
-            serials = np.random.choice(serials, size=sample_size, replace=False)
+            rng = np.random.default_rng(self.seed)
+            serials = rng.choice(serials, size=sample_size, replace=False)
             
         print(f"Running rolling inference on {len(serials)} serials...")
         val_df_filtered = val_df[val_df['serial_number'].isin(serials)].copy()

@@ -15,14 +15,14 @@ EXCLUDE_COLS = [
 ]
 
 # 5. 선택할 분류 모델 ('rf', 'lgbm', 'xgb', 'mlp', 'lstm', 'gru')
-MODEL = 'xgb'
+MODEL = 'gru'
 
 # 6. 기본 불균형 처리 방식:
 #    ['none', 'class_weight', 'undersampling', 'oversampling', 'smote', 'adasyn', 'easyensemble', 'focal_loss']
 #    - 'none': 클래스 가중치 미적용 (원본 데이터셋 그대로 학습)
 #    - 'class_weight': 동적 클래스 가중치 (N_neg / N_pos) 적용
 #    - 'focal_loss': PyTorch 모델('mlp', 'lstm', 'gru') 전용 Focal Loss
-IMBALANCE_STRATEGY = 'oversampling'
+IMBALANCE_STRATEGY = 'class_weight'
 
 # 7. 클래스 가중치(Class Weight) 명시적 활성화 여부
 #    (True: IMBALANCE_STRATEGY와 상관없이 클래스 가중치 N_neg / N_pos 강제 적용, False: IMBALANCE_STRATEGY 설정에 따름)
@@ -44,3 +44,6 @@ DROP_FAILURE_DAY_IN_TRAIN = False
 #     - True : results/{model}_{imbalance}_.../ 상세 폴더 및 CSV/PNG 아티팩트 생성
 #     - False: 상세 폴더를 생성하지 않고, 마스터 누적 CSV(master_experiment_results.csv)에만 기록 (폴더 난립 방지)
 SAVE_EXPERIMENT_ARTIFACTS = False
+
+# 13. GPU 가속 사용 여부 (XGBoost/LightGBM 공통 적용, GPU 미지원/실패 시 자동 CPU 폴백)
+USE_GPU = True
