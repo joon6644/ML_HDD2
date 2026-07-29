@@ -2,6 +2,7 @@ import os
 import math
 import numpy as np
 import pandas as pd
+from sklearn.preprocessing import StandardScaler
 try:
     import torch
 except ImportError:
@@ -9,12 +10,16 @@ except ImportError:
 
 import config
 
+DL_MODELS = {'mlp', 'lstm', 'gru'}
 
-def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_day_in_train: bool = None):
+
+def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_day_in_train: bool = None, model: str = None):
     """
     Loads train, validation, and test datasets dynamically from parquet files in the target directory.
     Constructs the binary target label for 30-day failure classification.
     Optionally drops failure day (RUL == 0) samples from train_df if requested.
+    Standardizes features (fit on train only, clipped to [-10, 10]) when `model` is a
+    deep learning architecture (mlp/lstm/gru); tree-based models receive raw features.
     """
     if splitted_dir is None:
         splitted_dir = config.DATASET_DIR
@@ -22,6 +27,8 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
         lead_time = config.TARGET_LEAD_TIME
     if drop_failure_day_in_train is None:
         drop_failure_day_in_train = config.DROP_FAILURE_DAY_IN_TRAIN
+    if model is None:
+        model = config.MODEL
 
     if not os.path.exists(splitted_dir):
         raise FileNotFoundError(f"Dataset directory does not exist: '{splitted_dir}'")
@@ -54,6 +61,25 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
     val_df = pd.read_parquet(val_path)
     test_df = pd.read_parquet(test_path)
 
+    # Trim the trailing `lead_time` days of HDD units whose observation ends
+    # normally (censored == 1: covers both mid-life dropout and simply
+    # reaching the dataset's last observed date). RUL counts down to 0 at
+    # that cutoff, so those final `lead_time` days carry an unverifiable
+    # "no failure" label -- the disk could have failed shortly after
+    # observation stopped, we just never got to see it.
+    def _trim_censored_tail(df: pd.DataFrame, name: str) -> pd.DataFrame:
+        drop_mask = (df['censored'] == 1) & (df['RUL'] < lead_time)
+        dropped = int(drop_mask.sum())
+        if dropped == 0:
+            return df
+        print(f"[Data Loader] Trimmed last {lead_time} days of censored (non-failed) HDD units "
+              f"from {name.upper()} set: {dropped:,} rows dropped.")
+        return df[~drop_mask].copy()
+
+    train_df = _trim_censored_tail(train_df, "train")
+    val_df = _trim_censored_tail(val_df, "val")
+    test_df = _trim_censored_tail(test_df, "test")
+
     # Option to drop failure day (RUL == 0) samples from training set only
     if drop_failure_day_in_train:
         before_count = len(train_df)
@@ -69,6 +95,18 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
             if df[col].dtype != 'float32':
                 df[col] = df[col].astype('float32')
         df[features] = df[features].fillna(0)
+
+    # Standardize features for deep learning models only (tree-based models
+    # don't need it). Fit strictly on train to avoid leakage, then apply the
+    # same transform to val/test and clip outliers to [-10, 10].
+    if model in DL_MODELS:
+        print(f"[Data Loader] Standardizing features for '{model}' (fit on train only, clip to [-10, 10])...")
+        scaler = StandardScaler()
+        train_df[features] = scaler.fit_transform(train_df[features]).astype('float32')
+        val_df[features] = scaler.transform(val_df[features]).astype('float32')
+        test_df[features] = scaler.transform(test_df[features]).astype('float32')
+        for df in [train_df, val_df, test_df]:
+            df[features] = df[features].clip(-10.0, 10.0)
 
     print(f"Loaded: Train={len(train_df):,} | Val={len(val_df):,} | Test={len(test_df):,} | Features={len(features)}")
     return train_df, val_df, test_df, features

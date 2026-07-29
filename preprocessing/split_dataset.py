@@ -1,16 +1,14 @@
 import os
 import sys
 import argparse
-import pickle
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
 
 def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, val_ratio: float = 0.1, seed: int = 42):
     """
-    주어진 preprocessed parquet 데이터를 serial_number 단위로 8:1:1 층화 그룹 분할을 수행하여 
+    주어진 preprocessed parquet 데이터를 serial_number 단위로 8:1:1 층화 그룹 분할을 수행하여
     모델명_train.parquet, 모델명_val.parquet, 모델명_test.parquet 파일로 저장합니다.
-    분할 도중 Train 기준으로 StandardScaler를 적합하여 전체 분할에 적용하고 [-10.0, 10.0] 클리핑을 가합니다.
+    정규화(스케일링)는 여기서 수행하지 않으며, data_loader에서 딥러닝 모델 사용 시에만 적용됩니다.
     """
     print(f"Loading preprocessed dataset: {input_path}...")
     df = pd.read_parquet(input_path)
@@ -75,29 +73,10 @@ def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, v
     train_df = df[df['serial_number'].isin(train_set)].copy()
     val_df = df[df['serial_number'].isin(val_set)].copy()
     test_df = df[df['serial_number'].isin(test_set)].copy()
-    
-    # ─── 데이터 누수 없이 Train 기준으로만 표준화 수행 ─────────────────────────────
-    print("Standardizing features (fit on train only)...")
-    scaler = StandardScaler()
-    
-    # 결측치 채우고 float32 형식 유지하며 fit_transform / transform 수행
-    train_df[features] = scaler.fit_transform(train_df[features].fillna(0).astype('float32'))
-    val_df[features] = scaler.transform(val_df[features].fillna(0).astype('float32'))
-    test_df[features] = scaler.transform(test_df[features].fillna(0).astype('float32'))
-    
-    print("Clipping outliers to [-10.0, 10.0]...")
-    for split_df in [train_df, val_df, test_df]:
-        split_df[features] = split_df[features].clip(-10.0, 10.0)
-    
+
     # 결과 폴더 생성
     os.makedirs(output_dir, exist_ok=True)
-    
-    # 추론용 Scaler 객체 저장
-    scaler_path = os.path.join(output_dir, "scaler.pkl")
-    with open(scaler_path, "wb") as f:
-        pickle.dump(scaler, f)
-    print(f"Saved fitted StandardScaler to {scaler_path}")
-    
+
     # 입력 파일명에서 모델명 추출 (예: ST12000NM0007_preprocessed.parquet -> ST12000NM0007)
     base_name = os.path.basename(input_path)
     model_name = base_name.replace("_preprocessed.parquet", "").replace(".parquet", "")

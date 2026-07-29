@@ -402,6 +402,23 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
     return df_concat
 
 
+_MASTER_CSV_KEY_COLS = ['Model', '데이터', '불균형 처리', '첫날포함여부', 'Seed', 'Lead Time']
+
+
+def _clean_and_dedup_rows(df: pd.DataFrame, new_row: pd.DataFrame) -> pd.DataFrame:
+    """Drop stray blank rows and any existing row matching the same experiment key
+    as `new_row` (so re-running a cached checkpoint replaces its old log entry
+    instead of appending a duplicate), then append `new_row`."""
+    df = df.dropna(how='all')
+    if not df.empty and all(c in df.columns for c in _MASTER_CSV_KEY_COLS):
+        new_key = new_row.iloc[0]
+        mask = pd.Series(True, index=df.index)
+        for c in _MASTER_CSV_KEY_COLS:
+            mask &= (df[c].astype(str) == str(new_key[c]))
+        df = df[~mask]
+    return pd.concat([df, new_row], ignore_index=True)
+
+
 def append_master_experiment_result(
     model_name: str,
     dataset_name: str,
@@ -409,10 +426,15 @@ def append_master_experiment_result(
     drop_failure_day: bool,
     row_metrics: dict,
     disk_metrics: dict,
+    seed: int = None,
+    lead_time: int = None,
     master_csv_path: str = None
 ):
     """
     Permanently appends experiment run metrics to a master CSV file.
+    Re-running the exact same (model, dataset, imbalance, drop_failure_day, seed, lead_time)
+    combination -- e.g. because a cached checkpoint was reused -- replaces the previous row for
+    that combination in place instead of appending a duplicate.
     If the master CSV file is locked by Excel (PermissionError), automatically saves to a temporary backup file
     (results/backup_master_results.csv) and auto-syncs with UTF-8 BOM encoding when Excel is closed on the next run!
     """
@@ -422,7 +444,7 @@ def append_master_experiment_result(
 
     if master_csv_path is None:
         master_csv_path = os.path.join(results_dir, "master_experiment_results.csv")
-        
+
     backup_csv_path = os.path.join(results_dir, "backup_master_results.csv")
 
     timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -434,6 +456,8 @@ def append_master_experiment_result(
         '데이터': os.path.basename(dataset_name),
         '불균형 처리': imbalance_strategy,
         '첫날포함여부': first_day_status,
+        'Seed': seed,
+        'Lead Time': lead_time,
         'Row Precision': round(float(row_metrics.get('precision', 0.0)), 4),
         'Row Recall': round(float(row_metrics.get('recall', 0.0)), 4),
         'Row F1': round(float(row_metrics.get('f1', 0.0)), 4),
@@ -450,20 +474,27 @@ def append_master_experiment_result(
 
     df_row = pd.DataFrame([row_data])
 
-    # 1. Try to sync any previous pending backup rows first
+    # 1. Try to sync any previous pending backup rows first (deduping against master)
     if os.path.exists(backup_csv_path) and os.path.exists(master_csv_path):
         try:
-            df_backup = pd.read_csv(backup_csv_path, encoding='utf-8-sig')
-            df_backup.to_csv(master_csv_path, mode='a', header=False, index=False, encoding='utf-8-sig')
+            df_backup = pd.read_csv(backup_csv_path, encoding='utf-8-sig').dropna(how='all')
+            df_master = pd.read_csv(master_csv_path, encoding='utf-8-sig')
+            for _, backup_row in df_backup.iterrows():
+                df_master = _clean_and_dedup_rows(df_master, pd.DataFrame([backup_row]))
+            df_master.to_csv(master_csv_path, index=False, encoding='utf-8-sig')
             os.remove(backup_csv_path)
             print(f"[Auto-Sync] Restored and synced pending backup results to master CSV -> {master_csv_path}")
         except Exception:
             pass  # Master CSV might still be locked
 
-    # 2. Try writing current row to master_experiment_results.csv
+    # 2. Try writing current row to master_experiment_results.csv (replacing any prior row with the same key)
     try:
-        file_exists = os.path.exists(master_csv_path)
-        df_row.to_csv(master_csv_path, mode='a', header=not file_exists, index=False, encoding='utf-8-sig')
+        if os.path.exists(master_csv_path):
+            df_master = pd.read_csv(master_csv_path, encoding='utf-8-sig')
+            df_final = _clean_and_dedup_rows(df_master, df_row)
+        else:
+            df_final = df_row
+        df_final.to_csv(master_csv_path, index=False, encoding='utf-8-sig')
         print("\n" + "="*80)
         print(f"[MASTER LOG] PERMANENT MASTER EXPERIMENT LOG APPENDED -> {master_csv_path}")
         print("="*80)
@@ -471,8 +502,12 @@ def append_master_experiment_result(
         print("="*80 + "\n")
     except PermissionError:
         # Fallback: Save to backup_master_results.csv with UTF-8-SIG encoding so data/encoding is NEVER corrupted!
-        backup_exists = os.path.exists(backup_csv_path)
-        df_row.to_csv(backup_csv_path, mode='a', header=not backup_exists, index=False, encoding='utf-8-sig')
+        if os.path.exists(backup_csv_path):
+            df_backup = pd.read_csv(backup_csv_path, encoding='utf-8-sig')
+            df_final = _clean_and_dedup_rows(df_backup, df_row)
+        else:
+            df_final = df_row
+        df_final.to_csv(backup_csv_path, index=False, encoding='utf-8-sig')
         print("\n" + "="*80)
         print(f"[SAFE-GUARD BACKUP] master_experiment_results.csv is currently LOCKED by Excel.")
         print(f"  -> Saved current experiment result with UTF-8 BOM encoding to BACKUP file: {backup_csv_path}")

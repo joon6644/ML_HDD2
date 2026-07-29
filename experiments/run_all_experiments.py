@@ -7,16 +7,16 @@ import config
 # 1. 순회 대상 설정
 # ------------------------------------------------------------------------------
 # 분류 모델 6종 전체
-MODELS = ['lgbm', 'xgb', 'mlp', 'lstm', 'gru']
+MODELS = ['lgbm', 'xgb', 'lstm', 'gru']
 
 # 불균형 처리 방식 ('oversampling', 'adasyn' 제외)
 IMBALANCE_STRATEGIES = [
     'none',
-    'class_weight',
-    'undersampling',
-    'smote',
-    'easyensemble',
-    'focal_loss'
+    # 'class_weight',
+    # 'undersampling',
+    # 'smote',
+    # 'easyensemble',
+    # 'focal_loss'
 ]
 
 # PyTorch 전용 Focal Loss 비호환 체크 함수

@@ -71,7 +71,7 @@ def main():
     print("=" * 60)
 
     # 1. Load Data
-    train_df, val_df, test_df, features = load_dataset(args.data, drop_failure_day_in_train=args.drop_failure_day)
+    train_df, val_df, test_df, features = load_dataset(args.data, drop_failure_day_in_train=args.drop_failure_day, model=args.model)
     
     # 2. Build Features
     if is_sequence_model:
@@ -257,7 +257,9 @@ def main():
                 imbalance_strategy=args.imbalance,
                 drop_failure_day=args.drop_failure_day,
                 row_metrics=row_metrics,
-                disk_metrics=disk_metrics
+                disk_metrics=disk_metrics,
+                seed=args.seed,
+                lead_time=args.lead_time
             )
         except PermissionError:
             print("\n[Warning] Could not write to master_experiment_results.csv because the file is currently open in Excel or another program.")

@@ -1,3 +1,0 @@
-﻿Evaluation_Level,TN,FP,FN,TP,Precision,Recall,F1_Score,FAR,Additional_Details
-Row-Level (Sample-wise),3688156,48321,4038,2980,0.0581,0.4246,0.1022,0.0129,PR-AUC: 0.0607 | AUROC: 0.8015
-Disk-Level (Entity-wise),46,0,3,1,1.0000,0.2500,0.4000,0.0000,Threshold: 0.0100 | Median LT: 23.00d | EDR@15: 0.2500

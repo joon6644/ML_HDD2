@@ -1,13 +1,13 @@
 import os
 
 # 1. 분할 데이터셋 경로
-DATASET_DIR = r"C:\Workspace\projects\26_2_COIN\data\splitted\ST12000NM0007_seed1234"
+DATASET_DIR = r"D:\이데아\ML_HDD2\data\splitted\ST12000NM0007"
 
 # 2. 고정 분류 타깃 기간 (일 단위, 30일 타깃 고정)
 TARGET_LEAD_TIME = 30
 
 # 3. 타임시리즈 시퀀스 윈도우 크기 (LSTM / GRU 전용)
-WINDOW_SIZE = 28
+WINDOW_SIZE = 14
 
 # 4. 피처 학습에서 제외할 메타데이터 및 타깃 컬럼
 EXCLUDE_COLS = [
