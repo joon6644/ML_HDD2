@@ -31,6 +31,7 @@ def main():
     
     input_file = os.path.join(raw_dir, f"{model}.parquet")
     output_file = os.path.join(processed_dir, f"{model}_preprocessed.parquet")
+    formatted_output_file = output_file.replace('\\', '/')
     temp_output_file = os.path.join(tmp_dir, f"{model}_preprocessed_temp.parquet")
     db_file = os.path.join(tmp_dir, f"preprocess_{model}.db")
     
@@ -81,7 +82,7 @@ def main():
             COPY (
                 SELECT {final_cols_str}
                 FROM final_preprocessed
-            ) TO '{output_file.replace('\\', '/')}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            ) TO '{formatted_output_file}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
         print(f"  - 최종 저장 완료 (소요시간: {time.time() - t0:.2f}초)")
         

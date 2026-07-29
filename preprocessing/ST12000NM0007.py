@@ -32,6 +32,8 @@ def main():
     input_file = os.path.join(raw_dir, f"{model}.parquet")
     output_file = os.path.join(processed_dir, f"{model}_preprocessed.parquet")
     temp_output_file = os.path.join(tmp_dir, f"{model}_preprocessed_temp.parquet")
+    formatted_output_file = output_file.replace('\\', '/')
+    formatted_temp_output_file = temp_output_file.replace('\\', '/')
     db_file = os.path.join(tmp_dir, f"preprocess_{model}.db")
     
     if not os.path.exists(input_file):
@@ -67,7 +69,7 @@ def main():
         # 6. 임시 데이터셋 Parquet로 먼저 저장 (이후 검증의 속도 단축을 위함)
         print(f"\n[Step 6] 임시 preprocessed 파일 저장 중 (1차 스캔 및 저장): {temp_output_file}")
         t0 = time.time()
-        con.execute(f"COPY final_preprocessed TO '{temp_output_file.replace('\\', '/')}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+        con.execute(f"COPY final_preprocessed TO '{formatted_temp_output_file}' (FORMAT PARQUET, COMPRESSION ZSTD)")
         print(f"  - 저장 완료 (소요시간: {time.time() - t0:.2f}초)")
         
         # 7. 중복 컬럼 검증
@@ -80,7 +82,7 @@ def main():
                 COUNT(*) AS total_rows,
                 SUM(CASE WHEN "smart_1_raw" = "smart_195_raw" OR ("smart_1_raw" IS NULL AND "smart_195_raw" IS NULL) THEN 1 ELSE 0 END) AS eq_1_195,
                 SUM(CASE WHEN "smart_197_raw" = "smart_198_raw" OR ("smart_197_raw" IS NULL AND "smart_198_raw" IS NULL) THEN 1 ELSE 0 END) AS eq_197_198
-            FROM read_parquet('{temp_output_file.replace('\\', '/')}')
+            FROM read_parquet('{formatted_temp_output_file}')
         """
         val_row = con.execute(validation_query).fetchone()
         total_rows, eq_1_195, eq_197_198 = val_row
@@ -116,8 +118,8 @@ def main():
             con.execute(f"""
                 COPY (
                     SELECT {final_cols_str} 
-                    FROM read_parquet('{temp_output_file.replace('\\', '/')}')
-                ) TO '{output_file.replace('\\', '/')}' (FORMAT PARQUET, COMPRESSION ZSTD)
+                    FROM read_parquet('{formatted_temp_output_file}')
+                ) TO '{formatted_output_file}' (FORMAT PARQUET, COMPRESSION ZSTD)
             """)
             print(f"  - 최종 저장 완료 (소요시간: {time.time() - t_final:.2f}초)")
             
