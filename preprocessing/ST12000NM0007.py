@@ -13,7 +13,7 @@ def main():
     parser.add_argument(
         "--max-memory",
         type=str,
-        default="6GB",
+        default="16GB",
         help="DuckDB 사용 메모리 제한 (예: 4GB, 6GB, 8GB)"
     )
     args = parser.parse_args()
@@ -66,79 +66,67 @@ def main():
             tmp_dir=tmp_dir
         )
         
-        # 6. 임시 데이터셋 Parquet로 먼저 저장 (이후 검증의 속도 단축을 위함)
-        print(f"\n[Step 6] 임시 preprocessed 파일 저장 중 (1차 스캔 및 저장): {temp_output_file}")
+        # final_preprocessed는 common에서 이미 물리화된 TABLE이다. 임시
+        # Parquet로 썼다가 다시 읽지 않고 TABLE에서 직접 중복 컬럼을 검증한다.
+        print("\n[후처리] 중복 SMART 컬럼 검증...")
         t0 = time.time()
-        con.execute(f"COPY final_preprocessed TO '{formatted_temp_output_file}' (FORMAT PARQUET, COMPRESSION ZSTD)")
-        print(f"  - 저장 완료 (소요시간: {time.time() - t0:.2f}초)")
-        
-        # 7. 중복 컬럼 검증
-        print("\n[Step 7] 물리적 임시 Parquet 파일을 이용한 중복 컬럼 검증...")
-        t0 = time.time()
-        
-        # smart_1_raw == smart_195_raw 및 smart_197_raw == smart_198_raw 검증
-        validation_query = f"""
-            SELECT 
-                COUNT(*) AS total_rows,
-                SUM(CASE WHEN "smart_1_raw" = "smart_195_raw" OR ("smart_1_raw" IS NULL AND "smart_195_raw" IS NULL) THEN 1 ELSE 0 END) AS eq_1_195,
-                SUM(CASE WHEN "smart_197_raw" = "smart_198_raw" OR ("smart_197_raw" IS NULL AND "smart_198_raw" IS NULL) THEN 1 ELSE 0 END) AS eq_197_198
-            FROM read_parquet('{formatted_temp_output_file}')
-        """
-        val_row = con.execute(validation_query).fetchone()
-        total_rows, eq_1_195, eq_197_198 = val_row
-        
-        is_1_195_equal = (eq_1_195 == total_rows)
-        is_197_198_equal = (eq_197_198 == total_rows)
-        
-        print(f"  - smart_1_raw == smart_195_raw 검증 결과: {is_1_195_equal} ({eq_1_195:,} / {total_rows:,} 일치)")
-        print(f"  - smart_197_raw == smart_198_raw 검증 결과: {is_197_198_equal} ({eq_197_198:,} / {total_rows:,} 일치)")
-        
         final_smart_cols = list(valid_smart_cols)
-        
-        # 8. 검증 결과에 따라 중복 컬럼 제거하여 최종 Parquet 저장
-        if is_1_195_equal and is_197_198_equal:
-            print("  - [검증 통과] 중복 컬럼 smart_195_raw 및 smart_198_raw를 최종 데이터셋에서 제거합니다.")
-            if "smart_195_raw" in final_smart_cols:
-                final_smart_cols.remove("smart_195_raw")
-            if "smart_198_raw" in final_smart_cols:
-                final_smart_cols.remove("smart_198_raw")
-            
-            print(f"\n[Step 8] 최종 컬럼 필터링 및 최종 저장 중: {output_file}")
-            t_final = time.time()
-            
-            final_cols = ["serial_number", "date", "segment", "model", "failure"] + final_smart_cols
-            final_cols_str = ", ".join([f'"{c}"' for c in final_cols])
-            
-            # 기존 최종 파일이 존재할 경우 삭제 후 저장
-            if os.path.exists(output_file):
-                try:
-                    os.remove(output_file)
-                except:
-                    pass
-            con.execute(f"""
-                COPY (
-                    SELECT {final_cols_str} 
-                    FROM read_parquet('{formatted_temp_output_file}')
-                ) TO '{formatted_output_file}' (FORMAT PARQUET, COMPRESSION ZSTD)
-            """)
-            print(f"  - 최종 저장 완료 (소요시간: {time.time() - t_final:.2f}초)")
-            
-            # 임시 파일 삭제
-            if os.path.exists(temp_output_file):
-                try:
-                    os.remove(temp_output_file)
-                except:
-                    pass
+        duplicate_pairs = [
+            ("smart_1_raw", "smart_195_raw"),
+            ("smart_197_raw", "smart_198_raw"),
+        ]
+        available_pairs = [
+            pair for pair in duplicate_pairs
+            if pair[0] in final_smart_cols and pair[1] in final_smart_cols
+        ]
+
+        if available_pairs:
+            match_expressions = [
+                (
+                    f'COUNT(*) FILTER (WHERE "{left}" '
+                    f'IS NOT DISTINCT FROM "{right}")'
+                )
+                for left, right in available_pairs
+            ]
+            validation_row = con.execute(
+                f"""
+                SELECT COUNT(*), {", ".join(match_expressions)}
+                FROM final_preprocessed
+                """
+            ).fetchone()
+            total_rows = validation_row[0]
+            for (left, right), match_count in zip(
+                available_pairs, validation_row[1:]
+            ):
+                is_equal = match_count == total_rows
+                print(
+                    f"  - {left} == {right}: {is_equal} "
+                    f"({match_count:,} / {total_rows:,})"
+                )
+                if is_equal:
+                    final_smart_cols.remove(right)
         else:
-            print("  - [검증 실패] 컬럼 값이 일치하지 않으므로, 중복 컬럼을 제거하지 않고 기존 임시 파일을 최종본으로 대체합니다.")
-            if os.path.exists(output_file):
-                try:
-                    os.remove(output_file)
-                except:
-                    pass
-            os.rename(temp_output_file, output_file)
-            
-        print(f"  - 검증 및 최종 처리 완료 (소요시간: {time.time() - t0:.2f}초)")
+            print("  - 결측률 필터 후 비교 가능한 중복 컬럼 쌍이 없습니다.")
+
+        # 최종 Parquet은 한 번만 기록한다.
+        print(f"\n[저장] 최종 Parquet 저장 중: {output_file}")
+        final_cols = [
+            "serial_number", "date", "segment", "model", "failure",
+            *final_smart_cols,
+        ]
+        final_cols_str = ", ".join(f'"{col}"' for col in final_cols)
+        if os.path.exists(output_file):
+            os.remove(output_file)
+        con.execute(
+            f"""
+            COPY (
+                SELECT {final_cols_str}
+                FROM final_preprocessed
+            ) TO '{formatted_output_file}'
+            (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
+        print(f"  - 검증 및 단일 저장 완료 ({time.time() - t0:.2f}초)")
         
         print("=" * 80)
         print(f" 전처리 완료! 총 소요시간: {time.time() - t_start:.2f}초")

@@ -17,16 +17,16 @@ def _quoted(column: str) -> str:
 def run_base_preprocessing(
     input_file: str,
     db_file: str,
-    max_memory: str = "6GB",
+    max_memory: str = "16GB",
     tmp_dir: str = ".tmp",
 ) -> tuple[duckdb.DuckDBPyConnection, list[str]]:
     """
     HDD SMART 원본 데이터의 공통 전처리를 수행한다.
 
     처리 순서:
-      1. (serial_number, date) 중복 행 제거
-      2. normalized SMART 및 불필요 컬럼 제거 (smart_*_raw만 보존)
-      3. 결측치 비율이 90% 이상인 SMART 컬럼 제거
+      1. normalized SMART 및 불필요 컬럼 제거 (smart_*_raw만 읽음)
+      2. 결측치 비율이 90% 이상인 SMART 컬럼 제거
+      3. (serial_number, date) 중복 행 제거
       4. 누락일 3일 이하는 날짜 행 생성 후 forward fill,
          누락일 4일 이상은 별도 segment로 분리
       5. forward fill 후 남은 결측치 backward fill
@@ -49,7 +49,7 @@ def run_base_preprocessing(
 
     con.execute(f"PRAGMA max_memory='{max_memory}'")
     con.execute(f"PRAGMA temp_directory='{formatted_tmp_dir}'")
-    con.execute("PRAGMA threads=4")
+    con.execute("PRAGMA threads=8")
     con.execute("SET preserve_insertion_order=false")
 
     print("\n[준비] 원본 스키마 확인...")
@@ -69,48 +69,9 @@ def run_base_preprocessing(
     if not smart_raw_columns:
         raise ValueError("보존할 smart_*_raw 컬럼이 없습니다.")
 
-    # 1. 동일 HDD/날짜 중복을 하나로 합친다. failure와 SMART 값은 MAX를
-    # 사용하여 중복 중 고장 표시 및 비결측 측정값이 유실되지 않게 한다.
-    print("\n[Step 1/7] (serial_number, date) 중복 행 제거...")
-    started = time.time()
-    aggregate_columns = []
-    for col in all_columns:
-        if col in {"serial_number", "date"}:
-            continue
-        quoted = _quoted(col)
-        if col == "failure":
-            aggregate_columns.append(
-                f"MAX(TRY_CAST({quoted} AS INTEGER)) AS {quoted}"
-            )
-        else:
-            aggregate_columns.append(f"MAX({quoted}) AS {quoted}")
-
-    con.execute(
-        f"""
-        CREATE OR REPLACE TABLE deduplicated_data AS
-        SELECT
-            serial_number,
-            date,
-            {", ".join(aggregate_columns)}
-        FROM read_parquet('{formatted_input}')
-        GROUP BY serial_number, date
-        """
-    )
-    source_rows, deduplicated_rows = con.execute(
-        f"""
-        SELECT
-            (SELECT COUNT(*) FROM read_parquet('{formatted_input}')),
-            (SELECT COUNT(*) FROM deduplicated_data)
-        """
-    ).fetchone()
-    print(
-        f"  - {source_rows:,} → {deduplicated_rows:,}행 "
-        f"({source_rows - deduplicated_rows:,}행 제거, {time.time() - started:.2f}초)"
-    )
-
-    # 2. 식별/라벨 컬럼과 raw SMART만 남긴다. smart_*_normalized 및 그 밖의
-    # 원본 메타데이터는 이 단계에서 제거한다.
-    print("\n[Step 2/7] normalized SMART 및 불필요 컬럼 제거...")
+    # 1. VIEW 투영으로 필요한 컬럼만 읽는다. DuckDB의 column pruning으로
+    # normalized/메타데이터 컬럼의 디코딩과 그룹 집계를 피한다.
+    print("\n[Step 1/7] normalized SMART 및 불필요 컬럼 제거...")
     retained_columns = [
         "serial_number",
         "date",
@@ -121,20 +82,21 @@ def run_base_preprocessing(
     retained_sql = ", ".join(_quoted(col) for col in retained_columns)
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE raw_features_only AS
+        CREATE OR REPLACE VIEW raw_features_only AS
         SELECT {retained_sql}
-        FROM deduplicated_data
+        FROM read_parquet('{formatted_input}')
         """
     )
     removed_columns = [col for col in all_columns if col not in retained_columns]
     print(
-        f"  - {len(removed_columns)}개 제거, SMART raw {len(smart_raw_columns)}개 보존"
+        f"  - {len(removed_columns)}개 제외, SMART raw {len(smart_raw_columns)}개 보존"
     )
 
-    # 3. 중복 제거 후의 데이터 기준으로 결측률을 계산한다.
-    print("\n[Step 3/7] 결측치 비율 90% 이상 SMART 컬럼 제거...")
+    # 2. 불필요 컬럼을 제외한 원본 행 기준으로 결측률을 계산하여, 무거운
+    # 중복 GROUP BY 전에 집계 대상 SMART 컬럼 수를 먼저 줄인다.
+    print("\n[Step 2/7] 결측치 비율 90% 이상 SMART 컬럼 제거...")
     started = time.time()
-    total_rows = con.execute("SELECT COUNT(*) FROM raw_features_only").fetchone()[0]
+    source_rows = con.execute("SELECT COUNT(*) FROM raw_features_only").fetchone()[0]
     count_sql = ", ".join(
         f"COUNT({_quoted(col)}) AS {_quoted(col)}" for col in smart_raw_columns
     )
@@ -145,7 +107,7 @@ def run_base_preprocessing(
     valid_smart_cols = []
     removed_for_missingness = []
     for col, non_null_count in zip(smart_raw_columns, non_null_counts):
-        missing_ratio = 1.0 - (non_null_count / total_rows) if total_rows else 1.0
+        missing_ratio = 1.0 - (non_null_count / source_rows) if source_rows else 1.0
         if missing_ratio >= MISSING_RATIO_THRESHOLD:
             removed_for_missingness.append((col, missing_ratio))
         else:
@@ -164,7 +126,7 @@ def run_base_preprocessing(
     selected_sql = ", ".join(_quoted(col) for col in selected_columns)
     con.execute(
         f"""
-        CREATE OR REPLACE TABLE selected_features AS
+        CREATE OR REPLACE VIEW selected_features AS
         SELECT {selected_sql}
         FROM raw_features_only
         """
@@ -174,6 +136,39 @@ def run_base_preprocessing(
     print(
         f"  - SMART raw {len(valid_smart_cols)}개 보존 "
         f"({time.time() - started:.2f}초)"
+    )
+
+    # 3. 결측률 필터를 통과한 컬럼만 대상으로 동일 HDD/날짜 중복을 합친다.
+    print("\n[Step 3/7] (serial_number, date) 중복 행 제거...")
+    started = time.time()
+    aggregate_columns = []
+    for col in selected_columns:
+        if col in {"serial_number", "date"}:
+            continue
+        quoted = _quoted(col)
+        if col == "failure":
+            aggregate_columns.append(
+                f"MAX(TRY_CAST({quoted} AS INTEGER)) AS {quoted}"
+            )
+        else:
+            aggregate_columns.append(f"MAX({quoted}) AS {quoted}")
+    con.execute(
+        f"""
+        CREATE OR REPLACE TABLE deduplicated_data AS
+        SELECT
+            serial_number,
+            date,
+            {", ".join(aggregate_columns)}
+        FROM selected_features
+        GROUP BY serial_number, date
+        """
+    )
+    deduplicated_rows = con.execute(
+        "SELECT COUNT(*) FROM deduplicated_data"
+    ).fetchone()[0]
+    print(
+        f"  - {source_rows:,} → {deduplicated_rows:,}행 "
+        f"({source_rows - deduplicated_rows:,}행 제거, {time.time() - started:.2f}초)"
     )
 
     # 4. 관측일 차이가 4일이면 실제 누락일은 3일이다. 따라서 날짜 차이가
@@ -195,7 +190,7 @@ def run_base_preprocessing(
                     PARTITION BY serial_number
                     ORDER BY TRY_CAST(date AS DATE)
                 ) AS previous_date
-            FROM selected_features
+            FROM deduplicated_data
         ),
         boundaries AS (
             SELECT
@@ -259,43 +254,24 @@ def run_base_preprocessing(
     )
 
     columns_to_fill = ["model", "failure", *valid_smart_cols]
-    forward_fill_sql = ", ".join(
-        f"""
-        LAST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
-            PARTITION BY serial_number, segment
-            ORDER BY record_date
-            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-        ) AS {_quoted(col)}
-        """
-        for col in columns_to_fill
-    )
-    con.execute(
-        f"""
-        CREATE OR REPLACE VIEW forward_filled AS
-        SELECT
-            serial_number,
-            record_date,
-            segment,
-            {forward_fill_sql}
-        FROM expanded_and_joined
-        """
-    )
-    expanded_rows = con.execute(
-        "SELECT COUNT(*) FROM forward_filled"
-    ).fetchone()[0]
-    print(
-        f"  - 누락 날짜 {expanded_rows - total_rows:,}행 생성 "
-        f"({time.time() - started:.2f}초)"
-    )
+    # 실제 fill 계산은 Step 5의 단일 윈도우 SELECT에서 수행한다.
+    print(f"  - 날짜 확장 실행 계획 생성 ({time.time() - started:.2f}초)")
 
     # 5. segment 시작부 등 forward fill로 채우지 못한 값만 미래 관측값으로
     # backward fill한다.
     print("\n[Step 5/7] 남은 결측치 backward fill...")
     started = time.time()
-    backward_fill_sql = ", ".join(
+    # forward fill과 fallback backward fill은 같은 정렬 키를 공유한다.
+    # 한 SELECT에 두 window expression을 배치하여 DuckDB가 하나의 WINDOW
+    # 연산에서 정렬을 공유하도록 한다.
+    bidirectional_fill_sql = ", ".join(
         f"""
         COALESCE(
-            {_quoted(col)},
+            LAST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
+                PARTITION BY serial_number, segment
+                ORDER BY record_date
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ),
             FIRST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
                 PARTITION BY serial_number, segment
                 ORDER BY record_date
@@ -307,16 +283,16 @@ def run_base_preprocessing(
     )
     con.execute(
         f"""
-        CREATE OR REPLACE VIEW fully_filled AS
+        CREATE OR REPLACE VIEW filled_rows AS
         SELECT
             serial_number,
             record_date,
             segment,
-            {backward_fill_sql}
-        FROM forward_filled
+            {bidirectional_fill_sql}
+        FROM expanded_and_joined
         """
     )
-    print(f"  - 완료 ({time.time() - started:.2f}초)")
+    print(f"  - 양방향 fill 단일 실행 계획 생성 ({time.time() - started:.2f}초)")
 
     # 6. 라벨을 임의의 0으로 바꾸지 않는다. model/failure/SMART 중 하나라도
     # 두 방향 채움 후 NULL이면 해당 행을 제거한다.
@@ -329,39 +305,30 @@ def run_base_preprocessing(
         f"""
         CREATE OR REPLACE TABLE complete_rows AS
         SELECT *
-        FROM fully_filled
+        FROM filled_rows
         WHERE {required_non_null_sql}
         """
     )
     complete_rows = con.execute("SELECT COUNT(*) FROM complete_rows").fetchone()[0]
-    print(
-        f"  - {expanded_rows - complete_rows:,}행 제거 "
-        f"({time.time() - started:.2f}초)"
-    )
+    print(f"  - 결측 제거 후 {complete_rows:,}행 ({time.time() - started:.2f}초)")
 
     # 7. 같은 HDD에서 failure=1이 먼저 나타난 뒤 더 늦은 날짜에 failure=0이
     # 나타나면 수리/재투입 또는 라벨 이상으로 보고 그 HDD 전체를 제거한다.
     print("\n[Step 7/7] 고장 후 정상으로 재기록된 HDD 제거...")
     started = time.time()
+    # 반드시 Step 6에서 결측 행을 제거한 결과를 기준으로 판정한다.
+    # "1이 나온 날짜보다 뒤에 0이 존재"하는 조건은 HDD별 최초 1 날짜와
+    # 최종 0 날짜의 비교로 정확히 표현할 수 있어, 전체 시계열 WINDOW 정렬은
+    # 필요하지 않다.
     con.execute(
         """
         CREATE OR REPLACE TABLE invalid_recovered_hdds AS
-        WITH failure_history AS (
-            SELECT
-                serial_number,
-                record_date,
-                failure,
-                MAX(failure) OVER (
-                    PARTITION BY serial_number
-                    ORDER BY record_date
-                    ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
-                ) AS previous_max_failure
-            FROM complete_rows
-        )
-        SELECT DISTINCT serial_number
-        FROM failure_history
-        WHERE previous_max_failure = 1
-          AND failure = 0
+        SELECT serial_number
+        FROM complete_rows
+        GROUP BY serial_number
+        HAVING
+            MIN(record_date) FILTER (WHERE failure = 1)
+            < MAX(record_date) FILTER (WHERE failure = 0)
         """
     )
     invalid_hdd_count = con.execute(
@@ -371,7 +338,7 @@ def run_base_preprocessing(
     final_feature_sql = ", ".join(_quoted(col) for col in valid_smart_cols)
     con.execute(
         f"""
-        CREATE OR REPLACE VIEW final_preprocessed AS
+        CREATE OR REPLACE TABLE final_preprocessed AS
         SELECT
             rows.serial_number,
             rows.record_date::VARCHAR AS date,
@@ -384,9 +351,7 @@ def run_base_preprocessing(
           ON rows.serial_number = invalid.serial_number
         """
     )
-    final_rows = con.execute(
-        "SELECT COUNT(*) FROM final_preprocessed"
-    ).fetchone()[0]
+    final_rows = con.execute("SELECT COUNT(*) FROM final_preprocessed").fetchone()[0]
     print(
         f"  - HDD {invalid_hdd_count:,}개 제거, 최종 {final_rows:,}행 "
         f"({time.time() - started:.2f}초)"
