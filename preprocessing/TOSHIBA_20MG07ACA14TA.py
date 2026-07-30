@@ -13,7 +13,7 @@ def main():
     parser.add_argument(
         "--max-memory",
         type=str,
-        default="48GB",
+        default="8GB",
         help="DuckDB 사용 메모리 제한 (예: 4GB, 6GB, 8GB)"
     )
     args = parser.parse_args()

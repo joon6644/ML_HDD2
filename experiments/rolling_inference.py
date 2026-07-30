@@ -226,17 +226,23 @@ class RollingEvaluator:
             
         return pd.DataFrame(records)
 
-    def find_best_threshold(self, raw_preds, lead_time=30):
+    def find_best_threshold(self, raw_preds, max_far=0.01, lead_time=30):
         """
-        Find the threshold that maximizes F1-score on the raw predictions.
+        Find the threshold that maximizes Recall on raw predictions subject to FAR <= max_far (1%).
+        If no threshold satisfies FAR <= max_far, returns the threshold that minimizes FAR.
         """
-        # Try thresholds from 0.01 to 0.99
         thresholds = np.linspace(0.01, 0.99, 99)
-        best_f1 = -1.0
+        best_recall = -1.0
+        best_far = 2.0
         best_threshold = 0.5
         
         failed_disks = sum(1 for disk in raw_preds if disk['has_failed'])
+        censored_disks = sum(1 for disk in raw_preds if not disk['has_failed'])
         
+        fallback_threshold = 0.5
+        fallback_min_far = 2.0
+        fallback_max_recall = -1.0
+
         for thresh in thresholds:
             hits = 0
             false_alarms = 0
@@ -259,14 +265,26 @@ class RollingEvaluator:
                     false_alarms += 1
                     
             recall = hits / failed_disks if failed_disks > 0 else 0.0
-            precision = hits / (hits + false_alarms) if (hits + false_alarms) > 0 else 0.0
-            f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+            far = false_alarms / censored_disks if censored_disks > 0 else 0.0
             
-            if f1 > best_f1:
-                best_f1 = f1
-                best_threshold = thresh
-                
-        return float(best_threshold), float(best_f1)
+            # Track fallback in case no threshold meets max_far (minimize FAR, then maximize Recall)
+            if (far < fallback_min_far) or (far == fallback_min_far and recall > fallback_max_recall):
+                fallback_min_far = far
+                fallback_max_recall = recall
+                fallback_threshold = thresh
+
+            # Filter by constraint FAR <= max_far (1%)
+            if far <= max_far:
+                if (recall > best_recall) or (recall == best_recall and far < best_far):
+                    best_recall = recall
+                    best_far = far
+                    best_threshold = thresh
+
+        if best_recall < 0:
+            best_threshold = fallback_threshold
+            best_recall = fallback_max_recall
+
+        return float(best_threshold), float(best_recall)
 
     def get_detailed_alarm_report(self, val_df, threshold=0.5, lead_time=30, sample_size=None):
         """
@@ -276,16 +294,16 @@ class RollingEvaluator:
         raw_preds = self.get_raw_predictions(val_df, sample_size=sample_size)
         return self.build_report_from_raw_predictions(raw_preds, threshold, lead_time)
 
-    def evaluate_alarms(self, val_df, threshold='auto', lead_time=30, sample_size=None, output_csv_path=None):
+    def evaluate_alarms(self, val_df, threshold='auto', max_far=0.01, lead_time=30, sample_size=None, output_csv_path=None):
         """
         Evaluate alarm policy metrics on validation set.
         """
         raw_preds = self.get_raw_predictions(val_df, sample_size=sample_size)
         
         if threshold == 'auto':
-            print("Searching for the optimal threshold that maximizes F1-score...")
-            best_thresh, best_f1 = self.find_best_threshold(raw_preds, lead_time=lead_time)
-            print(f"Optimal threshold found: {best_thresh:.4f} (Max F1-Score: {best_f1:.4%})")
+            print(f"Searching for optimal threshold that maximizes Recall under FAR <= {max_far:.2%} constraint...")
+            best_thresh, best_recall = self.find_best_threshold(raw_preds, max_far=max_far, lead_time=lead_time)
+            print(f"Optimal threshold found: {best_thresh:.4f} (Max Recall under FAR <= {max_far:.2%}: {best_recall:.4%})")
             target_threshold = best_thresh
         else:
             target_threshold = float(threshold)

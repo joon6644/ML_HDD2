@@ -4,7 +4,7 @@ import time
 import duckdb
 
 
-KEY_COLUMNS = {"serial_number", "date", "model", "failure"}
+KEY_COLUMNS = {"serial_number", "date", "failure"}
 MISSING_RATIO_THRESHOLD = 0.90
 MAX_FILLABLE_MISSING_DAYS = 3
 
@@ -72,21 +72,41 @@ def run_base_preprocessing(
     # 1. VIEW 투영으로 필요한 컬럼만 읽는다. DuckDB의 column pruning으로
     # normalized/메타데이터 컬럼의 디코딩과 그룹 집계를 피한다.
     print("\n[Step 1/7] normalized SMART 및 불필요 컬럼 제거...")
-    retained_columns = [
-        "serial_number",
-        "date",
-        "model",
-        "failure",
-        *smart_raw_columns,
-    ]
-    retained_sql = ", ".join(_quoted(col) for col in retained_columns)
-    con.execute(
-        f"""
-        CREATE OR REPLACE VIEW raw_features_only AS
-        SELECT {retained_sql}
-        FROM read_parquet('{formatted_input}')
-        """
-    )
+    has_model_col = "model" in all_columns
+    model_default = os.path.splitext(os.path.basename(input_file))[0]
+
+    if has_model_col:
+        retained_columns = [
+            "serial_number",
+            "date",
+            "model",
+            "failure",
+            *smart_raw_columns,
+        ]
+        retained_sql = ", ".join(_quoted(col) for col in retained_columns)
+        con.execute(
+            f"""
+            CREATE OR REPLACE VIEW raw_features_only AS
+            SELECT {retained_sql}
+            FROM read_parquet('{formatted_input}')
+            """
+        )
+    else:
+        retained_columns = [
+            "serial_number",
+            "date",
+            "failure",
+            *smart_raw_columns,
+        ]
+        retained_sql = ", ".join(_quoted(col) for col in retained_columns)
+        con.execute(
+            f"""
+            CREATE OR REPLACE VIEW raw_features_only AS
+            SELECT {retained_sql}, '{model_default}' AS model
+            FROM read_parquet('{formatted_input}')
+            """
+        )
+
     removed_columns = [col for col in all_columns if col not in retained_columns]
     print(
         f"  - {len(removed_columns)}개 제외, SMART raw {len(smart_raw_columns)}개 보존"

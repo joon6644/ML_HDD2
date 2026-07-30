@@ -1,7 +1,9 @@
 import os
 
 # 1. 분할 데이터셋 경로
-DATASET_DIR = r"D:\이데아\ML_HDD2\data\splitted\ST12000NM0007"
+DATASET_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "splitted", "ST12000NM0007")
+
+
 
 # 2. 고정 분류 타깃 기간 (일 단위, 30일 타깃 고정)
 TARGET_LEAD_TIME = 30
@@ -47,3 +49,7 @@ SAVE_EXPERIMENT_ARTIFACTS = False
 
 # 13. GPU 가속 사용 여부 (XGBoost/LightGBM 공통 적용, GPU 미지원/실패 시 자동 CPU 폴백)
 USE_GPU = True
+
+# 14. 임곗값 탐색 제약 조건 (FAR 1% 제약 하에서 Recall 최대화)
+MAX_FAR = 0.01
+

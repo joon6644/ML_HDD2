@@ -59,7 +59,7 @@ def main():
     print(f" Imbalance Strategy         : {args.imbalance.upper()}")
     print(f" Class Weight Enabled       : {is_cost_sensitive}")
     print(f" Early Stopping             : ENABLED for NN/Boosting (Val Loss); RF reports OOB + Val AUROC")
-    print(f" Threshold Optimization     : F1-Maximization on Validation Set")
+    print(f" Threshold Optimization     : Recall-Maximization under FAR <= 1% Constraint on Validation Set")
     print(f" Inference Mode             : ALWAYS BOTH (Row-Level + Disk-Level)")
     print(f" Save Detail Subfolders     : {args.save_artifacts}")
     print(f" Fixed Target Horizon       : {args.lead_time} days")
@@ -172,10 +172,10 @@ def main():
     )
 
     # 1) Search optimal decision threshold on Validation Set (No data leakage)
-    print("\n[Search] Finding optimal decision threshold on Validation Set (Val F1 Maximization)...")
+    print("\n[Search] Finding optimal decision threshold on Validation Set (Recall Maximization under FAR <= 1%)...")
     val_raw_preds = evaluator.get_raw_predictions(val_df, sample_size=args.sample_size, lead_time=args.lead_time)
-    opt_threshold, max_val_f1 = evaluator.find_best_threshold(val_raw_preds, lead_time=args.lead_time)
-    print(f"[Optimal Threshold] Found on Val Set: {opt_threshold:.4f} (Max Val F1: {max_val_f1:.4%})")
+    opt_threshold, max_val_recall = evaluator.find_best_threshold(val_raw_preds, max_far=getattr(config, 'MAX_FAR', 0.01), lead_time=args.lead_time)
+    print(f"[Optimal Threshold] Found on Val Set: {opt_threshold:.4f} (Max Val Recall @ FAR <= 1%: {max_val_recall:.4%})")
 
     # A. Row-Level Evaluation (Using Validation-Optimal Threshold)
     print("\n--- 1. [ROW-LEVEL (SAMPLE-WISE) EVALUATION] ---")
