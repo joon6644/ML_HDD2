@@ -165,8 +165,15 @@ class LazySequenceTensor:
 def build_sequences(df: pd.DataFrame, features: list, window_size: int = None, lead_time: int = None):
     """
     Build sequence dataset for LSTM/GRU time-series models.
-    Segment-aware: windows spanning a (serial_number, segment) boundary are excluded
-    to prevent learning across 4-day+ observation gaps.
+
+    [Solution A – Training/Inference consistency]
+    For every (serial_number, segment) group, window_size-1 copies of the first row
+    are prepended BEFORE the actual observations.  This lets the model learn from
+    the same first-row-replicated padding windows that predict_disk emits at
+    segment starts during rolling inference, eliminating the train/infer mismatch.
+
+    Cross-segment windows (i.e. windows that would span a 4-day+ gap) are still
+    rejected by the group_id boundary check.
     """
     if torch is None:
         raise ImportError("PyTorch is required for build_sequences.")
@@ -183,14 +190,35 @@ def build_sequences(df: pd.DataFrame, features: list, window_size: int = None, l
         sort_cols.append('segment')
     if 'date' in df.columns:
         sort_cols.append('date')
-    df_sorted = df.sort_values(sort_cols)
+    df_sorted = df.sort_values(sort_cols).reset_index(drop=True)
 
-    serials = df_sorted['serial_number'].values
-    x_data  = df_sorted[features].values
-    y_rul   = df_sorted['RUL'].values
-    c_data  = df_sorted['censored'].values
+    # ------------------------------------------------------------------
+    # Solution A: prepend (window_size - 1) copies of each segment's
+    # first row so the model sees the same padded windows as inference.
+    # ------------------------------------------------------------------
+    if window_size > 1:
+        group_cols = ['serial_number', 'segment'] if has_segment else ['serial_number']
+        pad_frames = []
+        for _, grp in df_sorted.groupby(group_cols, sort=False):
+            first_row = grp.iloc[0:1]
+            pad_frames.append(pd.concat([first_row] * (window_size - 1), ignore_index=True))
+        padding_df = pd.concat(pad_frames, ignore_index=True)
+        df_aug = pd.concat([padding_df, df_sorted], ignore_index=True)
+        # Re-sort so each segment block is: [pad … pad | actual rows]
+        df_aug = df_aug.sort_values(sort_cols).reset_index(drop=True)
+        n_padded = len(padding_df)
+        print(f"[build_sequences] Prepended {n_padded:,} padding rows "
+              f"({len(df_sorted.groupby(group_cols))} segment(s) × {window_size-1} rows each).")
+    else:
+        df_aug = df_sorted
+        n_padded = 0
 
-    n = len(df_sorted)
+    serials = df_aug['serial_number'].values
+    x_data  = df_aug[features].values
+    y_rul   = df_aug['RUL'].values
+    c_data  = df_aug['censored'].values
+    n       = len(df_aug)
+
     if n < window_size:
         return (torch.empty((0, window_size, len(features)), dtype=torch.float32),
                 torch.empty((0,), dtype=torch.float32))
@@ -198,16 +226,14 @@ def build_sequences(df: pd.DataFrame, features: list, window_size: int = None, l
     end_indices = np.arange(window_size - 1, n)
 
     if has_segment:
-        # group_id increments at every (serial_number, segment) boundary.
-        # A window is valid iff start-row and end-row share the same group_id.
-        seg_arr  = df_sorted['segment'].values
+        seg_arr  = df_aug['segment'].values
         boundary = np.zeros(n, dtype=bool)
         boundary[0]  = True
         boundary[1:] = (serials[1:] != serials[:-1]) | (seg_arr[1:] != seg_arr[:-1])
-        group_id = np.cumsum(boundary) - 1  # 0-indexed
+        group_id = np.cumsum(boundary) - 1
 
-        valid_mask  = (group_id[end_indices - window_size + 1] == group_id[end_indices])
-        n_excluded  = int((~valid_mask).sum())
+        valid_mask = (group_id[end_indices - window_size + 1] == group_id[end_indices])
+        n_excluded = int((~valid_mask).sum())
         if n_excluded > 0:
             print(f"[build_sequences] Excluded {n_excluded:,} cross-segment windows "
                   f"({n_excluded / len(end_indices):.2%} of {len(end_indices):,} candidates).")

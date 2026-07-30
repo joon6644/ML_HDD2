@@ -53,3 +53,7 @@ USE_GPU = True
 # 14. 임곗값 탐색 제약 조건 (FAR 1% 제약 하에서 Recall 최대화)
 MAX_FAR = 0.01
 
+# 15. 파이프라인 버전 (학습·추론 로직이 바뀔 때마다 올려 체크포인트를 무효화)
+#     v1 : 기초 구현
+#     v2 : segment 경계 window 제외 + 학습-추론 padding 일치화 (Solution A)
+PIPELINE_VERSION = "v2"

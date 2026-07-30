@@ -1,6 +1,7 @@
 import os
 import torch
 import joblib
+import config
 from models.lstm import LSTMClass
 from models.gru import GRUClass
 from models.mlp import MLPClass
@@ -12,7 +13,8 @@ def get_checkpoint_path(model_name: str, imbalance: str, seed: int, lead_time: i
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     clean_ds = os.path.basename(dataset_name.rstrip('/\\'))
     tag_part = f"_{extra_tag}" if extra_tag else ""
-    filename = f"{model_name.lower()}_{imbalance.lower()}{tag_part}_lead{lead_time}_seed{seed}_{clean_ds}.ckpt"
+    pv = getattr(config, 'PIPELINE_VERSION', 'v1')
+    filename = f"{model_name.lower()}_{imbalance.lower()}{tag_part}_lead{lead_time}_seed{seed}_{clean_ds}_p{pv}.ckpt"
     return os.path.join(CHECKPOINT_DIR, filename)
 
 ARCH_KWARG_NAMES = {
@@ -43,6 +45,7 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
         "dataset_name": dataset_name,
         "features": list(features) if features is not None else None,
         "window_size": window_size,
+        "pipeline_ver": getattr(config, 'PIPELINE_VERSION', 'v1'),
         "extra_meta": extra_meta or {}
     }
 
@@ -75,8 +78,17 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
 
 def _validate_checkpoint_compatibility(payload, ckpt_path, features=None, window_size=None):
     """Guard against silently reusing a checkpoint trained under a different feature
-    set or sequence window size (same cache-key filename does not guarantee either
-    stays constant if config.EXCLUDE_COLS / config.WINDOW_SIZE change over time)."""
+    set, sequence window size, or pipeline version."""
+    # Pipeline version check (catches segment/padding logic changes, etc.)
+    current_pv = getattr(config, 'PIPELINE_VERSION', 'v1')
+    saved_pv   = payload.get('pipeline_ver', 'v1')
+    if saved_pv != current_pv:
+        raise ValueError(
+            f"[Checkpoint Mismatch] '{ckpt_path}' was saved under pipeline version '{saved_pv}', "
+            f"but the current pipeline is '{current_pv}'. "
+            f"Delete or rename the checkpoint to force retraining under the new pipeline."
+        )
+
     saved_features = payload.get("features")
     if features is not None and saved_features is not None and list(features) != saved_features:
         raise ValueError(
