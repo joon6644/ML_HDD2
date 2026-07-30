@@ -165,6 +165,8 @@ class LazySequenceTensor:
 def build_sequences(df: pd.DataFrame, features: list, window_size: int = None, lead_time: int = None):
     """
     Build sequence dataset for LSTM/GRU time-series models.
+    Segment-aware: windows spanning a (serial_number, segment) boundary are excluded
+    to prevent learning across 4-day+ observation gaps.
     """
     if torch is None:
         raise ImportError("PyTorch is required for build_sequences.")
@@ -172,36 +174,58 @@ def build_sequences(df: pd.DataFrame, features: list, window_size: int = None, l
         window_size = config.WINDOW_SIZE
     if lead_time is None:
         lead_time = config.TARGET_LEAD_TIME
-        
+
+    has_segment = 'segment' in df.columns
+
+    # Sort by (serial_number, segment, date) so each segment is a contiguous block
     sort_cols = ['serial_number']
+    if has_segment:
+        sort_cols.append('segment')
     if 'date' in df.columns:
         sort_cols.append('date')
     df_sorted = df.sort_values(sort_cols)
-    
+
     serials = df_sorted['serial_number'].values
-    x_data = df_sorted[features].values
-    y_rul = df_sorted['RUL'].values
-    c_data = df_sorted['censored'].values
-    
+    x_data  = df_sorted[features].values
+    y_rul   = df_sorted['RUL'].values
+    c_data  = df_sorted['censored'].values
+
     n = len(df_sorted)
     if n < window_size:
         return (torch.empty((0, window_size, len(features)), dtype=torch.float32),
                 torch.empty((0,), dtype=torch.float32))
-    
+
     end_indices = np.arange(window_size - 1, n)
-    valid_mask = (serials[end_indices - window_size + 1] == serials[end_indices])
+
+    if has_segment:
+        # group_id increments at every (serial_number, segment) boundary.
+        # A window is valid iff start-row and end-row share the same group_id.
+        seg_arr  = df_sorted['segment'].values
+        boundary = np.zeros(n, dtype=bool)
+        boundary[0]  = True
+        boundary[1:] = (serials[1:] != serials[:-1]) | (seg_arr[1:] != seg_arr[:-1])
+        group_id = np.cumsum(boundary) - 1  # 0-indexed
+
+        valid_mask  = (group_id[end_indices - window_size + 1] == group_id[end_indices])
+        n_excluded  = int((~valid_mask).sum())
+        if n_excluded > 0:
+            print(f"[build_sequences] Excluded {n_excluded:,} cross-segment windows "
+                  f"({n_excluded / len(end_indices):.2%} of {len(end_indices):,} candidates).")
+    else:
+        valid_mask = (serials[end_indices - window_size + 1] == serials[end_indices])
+
     valid_indices = torch.tensor(end_indices[valid_mask], dtype=torch.long)
-    
+
     X_raw = torch.tensor(x_data, dtype=torch.float32)
-    y_raw = torch.tensor(y_rul, dtype=torch.float32)
+    y_raw = torch.tensor(y_rul,  dtype=torch.float32)
     c_raw = torch.tensor(c_data, dtype=torch.float32)
-    
+
     y_window = y_raw[valid_indices]
     c_window = c_raw[valid_indices]
-    
+
     y_binary = ((y_window <= lead_time) & (c_window == 0)).float()
-    X_lazy = LazySequenceTensor(X_raw, valid_indices, window_size)
-    
+    X_lazy   = LazySequenceTensor(X_raw, valid_indices, window_size)
+
     return X_lazy, y_binary
 
 

@@ -79,15 +79,21 @@ class RollingEvaluator:
         if lead_time is None:
             lead_time = config.TARGET_LEAD_TIME
 
-        df_sorted = disk_df.sort_values('date')
+        has_segment = 'segment' in disk_df.columns
+
+        # Sort order: respect segments before date so each segment is contiguous
+        sort_cols = ['segment', 'date'] if has_segment else ['date']
+        df_sorted = disk_df.sort_values(sort_cols)
+
         n = len(df_sorted)
         if n == 0:
             return np.array([]), np.array([]), np.array([])
-            
-        y_true = ((df_sorted['RUL'] <= lead_time) & (df_sorted['censored'] == 0)).astype(np.float32).values
+
+        y_true      = ((df_sorted['RUL'] <= lead_time) & (df_sorted['censored'] == 0)).astype(np.float32).values
         valid_dates = df_sorted['date'].values
-        x_raw = df_sorted[self.features].values
-        
+        x_raw       = df_sorted[self.features].values
+
+        # ---- Tabular (window_size == 1) path: no segment issue ----
         if self.window_size == 1 and not (hasattr(self.model, 'is_pytorch') and self.model.is_pytorch):
             if hasattr(self.model, 'predict_proba'):
                 preds = self.model.predict_proba(x_raw)[:, 1]
@@ -96,28 +102,37 @@ class RollingEvaluator:
                 if preds.ndim > 1 and preds.shape[1] == 2:
                     preds = preds[:, 1]
             else:
-                # Plain nn.Module (e.g. MLPClass) expects a float32 Tensor, not a raw ndarray
                 with torch.no_grad():
-                    x_t = torch.tensor(x_raw, dtype=torch.float32, device=self.device)
+                    x_t   = torch.tensor(x_raw, dtype=torch.float32, device=self.device)
                     preds = torch.sigmoid(self.model(x_t)).view(-1).cpu().numpy()
             return valid_dates, y_true, preds
 
-        x_tensor = torch.tensor(x_raw, dtype=torch.float32, device=self.device)
-        if self.window_size > 1:
-            first_row = x_tensor[0:1]
-            padding = first_row.repeat(self.window_size - 1, 1)
-            x_padded = torch.cat([padding, x_tensor], dim=0)
-            x_batch = x_padded.unfold(0, self.window_size, 1).transpose(1, 2)
-        else:
-            x_batch = x_tensor
-            
-        if hasattr(self.model, 'predict_proba'):
-            preds = self.model.predict_proba(x_batch)[:, 1]
-        else:
+        # ---- Sequence (window_size > 1) path ----
+        def _infer_batch(x_batch):
+            """Run model inference on a pre-built (N, W, F) tensor."""
+            if hasattr(self.model, 'predict_proba'):
+                return self.model.predict_proba(x_batch)[:, 1]
             with torch.no_grad():
-                logits = self.model(x_batch)
-                preds = torch.sigmoid(logits).view(-1).cpu().numpy()
-            
+                return torch.sigmoid(self.model(x_batch)).view(-1).cpu().numpy()
+
+        def _build_windows(x_np):
+            """Pad first row (W-1) times and unfold into (N, W, F) tensor."""
+            x_t    = torch.tensor(x_np, dtype=torch.float32, device=self.device)
+            if self.window_size > 1:
+                padding = x_t[0:1].repeat(self.window_size - 1, 1)
+                x_t     = torch.cat([padding, x_t], dim=0)
+            return x_t.unfold(0, self.window_size, 1).transpose(1, 2)
+
+        if has_segment and self.window_size > 1:
+            # Process each segment independently so window history resets at boundaries
+            seg_preds = []
+            for seg_id in df_sorted['segment'].unique():
+                seg_x = df_sorted.loc[df_sorted['segment'] == seg_id, self.features].values
+                seg_preds.append(_infer_batch(_build_windows(seg_x)))
+            preds = np.concatenate(seg_preds)
+        else:
+            preds = _infer_batch(_build_windows(x_raw))
+
         return valid_dates, y_true, preds
 
     def get_raw_predictions(self, val_df, sample_size=None, lead_time=None):
