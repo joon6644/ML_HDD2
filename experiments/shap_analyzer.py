@@ -59,12 +59,36 @@ class SHAPAnalyzer:
         # Case A: Sequence Model (3D: N, W, F)
         # ---------------------------------------------------------
         if X_data.ndim == 3:
-            # Average over time dimension for feature-level SHAP explanation
+            # Check if PyTorch NN module for DeepExplainer / GradientExplainer
+            if torch is not None and isinstance(self.model, torch.nn.Module):
+                try:
+                    self.model.eval()
+                    device = next(self.model.parameters()).device
+                    t_bg = torch.tensor(X_data[bg_indices], dtype=torch.float32).to(device)
+                    t_eval = torch.tensor(X_data[eval_indices], dtype=torch.float32).to(device)
+                    
+                    # Try PyTorch DeepExplainer or GradientExplainer for deep sequence models
+                    try:
+                        explainer = shap.DeepExplainer(self.model, t_bg)
+                        raw_shap = explainer.shap_values(t_eval)
+                    except Exception:
+                        explainer = shap.GradientExplainer(self.model, t_bg)
+                        raw_shap = explainer.shap_values(t_eval)
+
+                    if isinstance(raw_shap, list):
+                        raw_shap = raw_shap[0]
+                    # Convert tensor to numpy and average over sequence length (W) -> (N, F)
+                    shap_vals = np.array(raw_shap).mean(axis=1)
+                    X_2d_eval = X_data[eval_indices].mean(axis=1)
+                    return shap_vals, X_2d_eval
+                except Exception as e:
+                    print(f"[SHAP Fallback] PyTorch DeepExplainer failed for 3D sequence ({e}), falling back to Kernel Explainer...")
+
+            # Fallback for sequence models: Average over time dimension
             X_2d_bg = X_data[bg_indices].mean(axis=1)
             X_2d_eval = X_data[eval_indices].mean(axis=1)
 
             def _predict_seq_wrapper(x_2d):
-                """Wrapper to expand 2D (N, F) back to 3D (N, W, F) for sequence prediction."""
                 W = X_data.shape[1]
                 x_3d = np.repeat(x_2d[:, np.newaxis, :], W, axis=1)
 
@@ -93,7 +117,7 @@ class SHAPAnalyzer:
         X_bg = X_data[bg_indices]
         X_eval = X_data[eval_indices]
 
-        # 1. Tree Models (RF, LightGBM, XGBoost)
+        # 1. Tree-based Models (Random Forest, LightGBM, XGBoost -> TreeExplainer)
         if self.model_type in ['rf', 'lgbm', 'xgb', 'tree'] or hasattr(self.model, 'tree_explanation'):
             try:
                 explainer = shap.TreeExplainer(self.model)
@@ -102,20 +126,28 @@ class SHAPAnalyzer:
                     shap_vals = shap_vals[1]  # Binary classification positive class
                 return shap_vals, X_eval
             except Exception as e:
-                print(f"[SHAP Fallback] TreeExplainer failed ({e}), falling back to KernelExplainer...")
+                print(f"[SHAP Fallback] TreeExplainer failed ({e}), falling back to generic Explainer...")
 
-        # 2. PyTorch Tabular Model (MLP)
-        if isinstance(self.model, torch.nn.Module) or self.model_type == 'pytorch_class':
-            def _predict_torch_wrapper(x_2d):
+        # 2. PyTorch Deep Learning Model (MLP -> DeepExplainer / GradientExplainer)
+        if torch is not None and (isinstance(self.model, torch.nn.Module) or self.model_type == 'pytorch_class'):
+            try:
                 self.model.eval()
                 device = next(self.model.parameters()).device
-                with torch.no_grad():
-                    t_x = torch.tensor(x_2d, dtype=torch.float32).to(device)
-                    return torch.sigmoid(self.model(t_x)).cpu().numpy().flatten()
+                t_bg = torch.tensor(X_bg, dtype=torch.float32).to(device)
+                t_eval = torch.tensor(X_eval, dtype=torch.float32).to(device)
 
-            explainer = shap.Explainer(_predict_torch_wrapper, X_bg)
-            shap_vals = explainer(X_eval)
-            return shap_vals.values, X_eval
+                try:
+                    explainer = shap.DeepExplainer(self.model, t_bg)
+                    raw_shap = explainer.shap_values(t_eval)
+                except Exception:
+                    explainer = shap.GradientExplainer(self.model, t_bg)
+                    raw_shap = explainer.shap_values(t_eval)
+
+                if isinstance(raw_shap, list):
+                    raw_shap = raw_shap[0]
+                return np.array(raw_shap), X_eval
+            except Exception as e:
+                print(f"[SHAP Fallback] PyTorch DeepExplainer failed for 2D MLP ({e}), falling back to Kernel Explainer...")
 
         # 3. EasyEnsemble or generic model wrapper
         if hasattr(self.model, 'predict_proba'):
@@ -130,6 +162,7 @@ class SHAPAnalyzer:
         explainer = shap.Explainer(self.model.predict, X_bg)
         shap_vals = explainer(X_eval)
         return shap_vals.values, X_eval
+
 
     def generate_and_save_plots(self, X_data, save_dir, filename_prefix="shap"):
         """
