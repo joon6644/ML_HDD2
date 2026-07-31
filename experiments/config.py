@@ -17,14 +17,14 @@ EXCLUDE_COLS = [
 ]
 
 # 5. 선택할 분류 모델 ('rf', 'lgbm', 'xgb', 'mlp', 'lstm', 'gru')
-MODEL = 'gru'
+MODEL = 'lgbm', 'xgb', 'lstm', 'gru'
 
 # 6. 기본 불균형 처리 방식:
 #    ['none', 'class_weight', 'undersampling', 'oversampling', 'smote', 'adasyn', 'easyensemble', 'focal_loss']
 #    - 'none': 클래스 가중치 미적용 (원본 데이터셋 그대로 학습)
 #    - 'class_weight': 동적 클래스 가중치 (N_neg / N_pos) 적용
 #    - 'focal_loss': PyTorch 모델('mlp', 'lstm', 'gru') 전용 Focal Loss
-IMBALANCE_STRATEGY = 'class_weight'
+IMBALANCE_STRATEGY = 'none'
 
 # 7. 클래스 가중치(Class Weight) 명시적 활성화 여부
 #    (True: IMBALANCE_STRATEGY와 상관없이 클래스 가중치 N_neg / N_pos 강제 적용, False: IMBALANCE_STRATEGY 설정에 따름)
@@ -56,4 +56,10 @@ MAX_FAR = 0.01
 # 15. 파이프라인 버전 (학습·추론 로직이 바뀔 때마다 올려 체크포인트를 무효화)
 #     v1 : 기초 구현
 #     v2 : segment 경계 window 제외 + 학습-추론 padding 일치화 (Solution A)
-PIPELINE_VERSION = "v2"
+PIPELINE_VERSION = "v3"
+
+# 16. 모델 가중치(체크포인트) 저장 여부
+#     - True : 학습 완료 후 checkpoints/ 디렉터리에 모델 체크포인트(.ckpt) 저장
+#     - False: 모델 가중치를 저장하지 않음 (디스크 용량 절약 및 빠른 연산용)
+SAVE_MODEL_WEIGHTS = True
+

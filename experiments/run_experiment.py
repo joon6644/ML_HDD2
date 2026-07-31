@@ -41,6 +41,7 @@ def main():
     parser.add_argument('--lead-time', type=int, default=config.TARGET_LEAD_TIME, help='Fixed target lead time in days')
     parser.add_argument('--drop-failure-day', action='store_true', default=config.DROP_FAILURE_DAY_IN_TRAIN, help='Drop failure-day (RUL == 0) samples from the training set')
     parser.add_argument('--save-artifacts', action='store_true', default=config.SAVE_EXPERIMENT_ARTIFACTS, help='Save detailed subfolders/plots')
+    parser.add_argument('--save-model-weights', action='store_true', default=getattr(config, 'SAVE_MODEL_WEIGHTS', True), help='Save model checkpoint weights to checkpoints/ directory')
     parser.add_argument('--sample-size', type=int, default=config.SAMPLE_SIZE, help='Limit val/test disks for rapid testing')
     parser.add_argument('--use-gpu', action='store_true', default=config.USE_GPU, help='Attempt GPU training for XGBoost/LightGBM (auto CPU fallback on failure)')
     args = parser.parse_args()
@@ -62,10 +63,12 @@ def main():
     print(f" Threshold Optimization     : Recall-Maximization under FAR <= 1% Constraint on Validation Set")
     print(f" Inference Mode             : ALWAYS BOTH (Row-Level + Disk-Level)")
     print(f" Save Detail Subfolders     : {args.save_artifacts}")
+    print(f" Save Model Weights         : {args.save_model_weights}")
     print(f" Fixed Target Horizon       : {args.lead_time} days")
     print(f" Seed                       : {args.seed}")
     print(f" Drop Failure Day in Train  : {args.drop_failure_day}")
     print(f" GPU Acceleration (XGB/LGBM): {'ENABLED (auto CPU fallback)' if args.use_gpu else 'DISABLED (CPU only)'}")
+
     if args.sample_size:
         print(f" [FAST TEST MODE]          : Sample size limited to {args.sample_size} disks")
     print("=" * 60)
@@ -157,8 +160,11 @@ def main():
                     model = train_mlp_model(X_train_proc, y_train_proc, X_val_2d, y_val, seed=args.seed, is_cost_sensitive=is_cost_sensitive, use_focal_loss=use_focal_loss)
                     model_type = 'pytorch_class'
 
-        # Save checkpoint immediately after training
-        save_checkpoint(model, args.model, args.imbalance, args.seed, args.lead_time, args.data, extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size)
+        # Save checkpoint immediately after training if enabled in config/cli
+        if args.save_model_weights:
+            save_checkpoint(model, args.model, args.imbalance, args.seed, args.lead_time, args.data, extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size)
+        else:
+            print("\n[Checkpoint Manager] Skipping checkpoint save (SAVE_MODEL_WEIGHTS = False).")
 
     # 3. Perform Inference & Evaluation (ALWAYS BOTH)
     print("\n[Step 3] Running Full Inference & Evaluation (Row-Level + Disk-Level)...")
