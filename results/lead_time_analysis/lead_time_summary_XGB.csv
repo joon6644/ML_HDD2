@@ -1,0 +1,4 @@
+﻿hdd,manufacturer,model,threshold,failed_disks,hit_disks,hit_rate_pct,mean_lead_time,median_lead_time,std_lead_time,image_path
+ST12000NM0007,Seagate (ST12000NM0007),XGB,0.11,225,50,22.22222222222222,6.38,3.5,8.089227404394068,C:\Workspace\projects\26_2_COIN\analysis\lead_time_analysis\lead_time_ST12000NM0007_XGB.png
+HGST_20HUH721212ALN604,HGST (20HUH721212ALN604),XGB,0.46,162,18,11.11111111111111,7.444444444444445,7.0,6.273597428219157,C:\Workspace\projects\26_2_COIN\analysis\lead_time_analysis\lead_time_HGST_20HUH721212ALN604_XGB.png
+TOSHIBA_20MG07ACA14TA,Toshiba (20MG07ACA14TA),XGB,0.13,209,38,18.181818181818183,9.078947368421053,6.5,8.554412769988081,C:\Workspace\projects\26_2_COIN\analysis\lead_time_analysis\lead_time_TOSHIBA_20MG07ACA14TA_XGB.png
