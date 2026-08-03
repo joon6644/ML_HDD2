@@ -254,7 +254,7 @@ def main():
         print("\n[Step 4] Skipping detailed subfolder creation (SAVE_EXPERIMENT_ARTIFACTS = False).")
 
     # C. Permanent Master Experiment Cumulative Log CSV
-    # 🚨 DO NOT log fast test runs with sample reduction (sample_size is not None) to prevent master CSV metrics distortion
+    # DO NOT log fast test runs with sample reduction (sample_size is not None) to prevent master CSV metrics distortion
     if args.sample_size is None:
         try:
             append_master_experiment_result(
@@ -264,6 +264,7 @@ def main():
                 drop_failure_day=args.drop_failure_day,
                 row_metrics=row_metrics,
                 disk_metrics=disk_metrics,
+                single_obs_metrics=disk_metrics.get('single_obs', {}),
                 seed=args.seed,
                 lead_time=args.lead_time
             )

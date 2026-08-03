@@ -43,24 +43,53 @@ DEFAULT_THRESHOLDS = {
 }
 
 
-def load_threshold_map() -> dict:
+def load_threshold_map(seed: int = None) -> dict:
     """
-    Loads standard operational evaluation thresholds from master_experiment_results.csv.
+    Loads operational evaluation thresholds from master_experiment_results.csv.
+    When seed is provided, prefers thresholds from that exact seed's run.
     Falls back to DEFAULT_THRESHOLDS if file is missing or entry is not found.
     """
     threshold_map = DEFAULT_THRESHOLDS.copy()
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     master_csv = os.path.join(project_root, "results", "master_experiment_results.csv")
-    
+
     if os.path.exists(master_csv):
         try:
             df = pd.read_csv(master_csv, encoding='utf-8-sig')
+            if 'Threshold' not in df.columns:
+                raise KeyError("'Threshold' column missing from master CSV")
+
+            # Normalize Seed column for comparison
+            def _norm(v):
+                if pd.isna(v): return ""
+                try:
+                    f = float(v)
+                    return str(int(f)) if f.is_integer() else str(f)
+                except (ValueError, TypeError):
+                    return str(v).strip()
+
+            # First pass: load all thresholds (seed-agnostic baseline)
             for _, row in df.iterrows():
                 hdd = str(row['데이터']).strip()
                 model_name = str(row['Model']).upper()
                 thresh = float(row['Threshold'])
                 threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Loaded operational thresholds from: {master_csv}")
+
+            # Second pass: if seed specified, override with exact-seed thresholds
+            if seed is not None:
+                seed_str = _norm(seed)
+                seed_df = df[df['Seed'].apply(_norm) == seed_str]
+                for _, row in seed_df.iterrows():
+                    hdd = str(row['데이터']).strip()
+                    model_name = str(row['Model']).upper()
+                    thresh = float(row['Threshold'])
+                    threshold_map[(hdd, model_name)] = thresh
+                if len(seed_df) > 0:
+                    print(f"[Threshold Loader] Seed={seed}: loaded {len(seed_df)} seed-specific thresholds from: {master_csv}")
+                else:
+                    print(f"[Threshold Loader] Seed={seed}: no seed-specific rows found; using latest available thresholds.")
+            else:
+                print(f"[Threshold Loader] Loaded operational thresholds (all seeds) from: {master_csv}")
         except Exception as e:
             print(f"[Threshold Loader] Warning: Could not read master CSV ({e}). Using default map.")
     return threshold_map
@@ -120,13 +149,16 @@ def evaluate_single_observation(model_name: str, hdd_name: str, threshold: float
 
     is_sequence_model = (model_name.lower() in ['lstm', 'gru'])
     ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
-    
-    # Force PIPELINE_VERSION to match checkpoint version (pv2)
-    config.PIPELINE_VERSION = "v2"
 
+    # Use config.PIPELINE_VERSION as-is (do NOT override to 'v2'; checkpoints trained by
+    # run_experiment.py are saved under the current PIPELINE_VERSION in config.py)
     train_df, test_df, features = load_dataset_no_censoring_trim(splitted_dir, model_name)
 
-    ckpt_tag = "cw0_focal0"
+    # ckpt_tag must mirror run_experiment.py logic: cw0_focal0 when none/no class weight
+    is_cost_sensitive = config.USE_CLASS_WEIGHT or (config.IMBALANCE_STRATEGY == 'class_weight')
+    use_focal_loss = (config.IMBALANCE_STRATEGY == 'focal_loss')
+    ckpt_tag = f"cw{int(is_cost_sensitive)}_focal{int(use_focal_loss)}"
+
     model = load_checkpoint(
         model_name.lower(), "none", seed, config.TARGET_LEAD_TIME, splitted_dir,
         input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size
@@ -173,6 +205,7 @@ def evaluate_single_observation(model_name: str, hdd_name: str, threshold: float
 
     precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
     recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
     far = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
 
     return {
@@ -185,8 +218,68 @@ def evaluate_single_observation(model_name: str, hdd_name: str, threshold: float
         'tn': tn,
         'disk_precision': precision,
         'disk_recall': recall,
+        'f1': f1,
         'far': far
     }
+
+
+def _update_master_csv_single_obs(results: list, seed: int):
+    """
+    Updates the Single-Obs Precision/Recall/F1/FAR columns in master_experiment_results.csv
+    for the given seed using results computed via the uncensored (no-trim) method.
+    Preserves all other rows and columns.
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    master_csv = os.path.join(project_root, "results", "master_experiment_results.csv")
+
+    if not os.path.exists(master_csv):
+        print(f"[Master CSV Update] master_experiment_results.csv not found, skipping.")
+        return
+
+    def _norm(v):
+        if pd.isna(v): return ""
+        try:
+            f = float(v)
+            return str(int(f)) if f.is_integer() else str(f)
+        except (ValueError, TypeError):
+            return str(v).strip().lower()
+
+    try:
+        df = pd.read_csv(master_csv, encoding='utf-8-sig')
+
+        # Ensure Single-Obs columns exist with object dtype to accept float values safely
+        for col in ['Single-Obs Precision', 'Single-Obs Recall', 'Single-Obs F1', 'Single-Obs FAR (%)']:
+            if col not in df.columns:
+                df[col] = None
+            df[col] = df[col].astype(object)
+
+        seed_str = _norm(seed)
+        updated = 0
+        for res in results:
+            hdd = str(res['hdd']).strip()
+            model = str(res['model']).upper().strip()
+            mask = (
+                df['Seed'].apply(_norm) == seed_str
+            ) & (
+                df['데이터'].apply(lambda v: _norm(v)) == _norm(hdd)
+            ) & (
+                df['Model'].apply(lambda v: _norm(v)) == _norm(model)
+            )
+            if mask.sum() == 0:
+                print(f"  [Skip] No master CSV row for Seed={seed} | HDD={hdd} | Model={model}")
+                continue
+            df.loc[mask, 'Single-Obs Precision'] = round(res['disk_precision'], 4)
+            df.loc[mask, 'Single-Obs Recall']    = round(res['disk_recall'], 4)
+            df.loc[mask, 'Single-Obs F1']         = round(res['f1'], 4)
+            df.loc[mask, 'Single-Obs FAR (%)']    = round(res['far'] * 100, 2)
+            updated += mask.sum()
+
+        df.to_csv(master_csv, index=False, encoding='utf-8-sig')
+        print(f"[Master CSV Update] Updated {updated} row(s) with corrected Single-Obs metrics (Seed={seed}) -> {master_csv}")
+    except PermissionError:
+        print(f"[Master CSV Update] master_experiment_results.csv is locked (Excel open?). Skipping master update.")
+    except Exception as e:
+        print(f"[Master CSV Update] Failed: {e}")
 
 
 def main():
@@ -204,7 +297,7 @@ def main():
     if args.model:
         model_list = [args.model.upper()]
 
-    threshold_map = load_threshold_map()
+    threshold_map = load_threshold_map(seed=args.seed)
     results = []
 
     print("\n" + "=" * 80)
@@ -243,10 +336,45 @@ def main():
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     out_csv = os.path.join(project_root, "results", "single_observation_eval_results.csv")
     
-    export_df = df_res[['hdd', 'model', 'disk_precision', 'disk_recall', 'far']].copy()
-    export_df.columns = ['HDD', 'Model', 'Disk Precision', 'Disk Recall', 'FAR']
-    export_df.to_csv(out_csv, index=False, encoding='utf-8-sig')
-    print(f"Saved evaluation summary table to: {out_csv}\n")
+    export_df = df_res[['hdd', 'model', 'disk_precision', 'disk_recall', 'f1', 'far']].copy()
+    export_df.columns = ['HDD', 'Model', 'Disk Precision', 'Disk Recall', 'F1', 'FAR']
+    export_df['Seed'] = args.seed
+
+    if os.path.exists(out_csv):
+        try:
+            existing_df = pd.read_csv(out_csv, encoding='utf-8-sig')
+            if 'Seed' not in existing_df.columns:
+                existing_df['Seed'] = 42
+
+            def _norm(val):
+                if pd.isna(val):
+                    return ""
+                try:
+                    f = float(val)
+                    if f.is_integer():
+                        return str(int(f))
+                    return str(f)
+                except (ValueError, TypeError):
+                    return str(val).strip().lower()
+
+            mask = pd.Series(False, index=existing_df.index)
+            for _, r in export_df.iterrows():
+                hdd_match = existing_df['HDD'].apply(_norm) == _norm(r['HDD'])
+                model_match = existing_df['Model'].apply(_norm) == _norm(r['Model'])
+                seed_match = existing_df['Seed'].apply(_norm) == _norm(r['Seed'])
+                mask |= (hdd_match & model_match & seed_match)
+            existing_df = existing_df[~mask]
+            final_df = pd.concat([existing_df, export_df], ignore_index=True)
+        except Exception:
+            final_df = export_df
+    else:
+        final_df = export_df
+
+    final_df.to_csv(out_csv, index=False, encoding='utf-8-sig')
+    print(f"Saved evaluation summary table (Seed={args.seed}) to: {out_csv}\n")
+
+    # Also update master_experiment_results.csv Single-Obs columns with the corrected (uncensored) metrics
+    _update_master_csv_single_obs(results, seed=args.seed)
 
 
 if __name__ == "__main__":

@@ -300,7 +300,53 @@ class RollingEvaluator:
         report_df = self.build_report_from_raw_predictions(raw_preds, target_threshold, lead_time=lead_time)
         metrics = analyze_report(report_df, threshold=target_threshold)
         metrics['threshold'] = target_threshold
+
+        # Evaluation Method 3: Single Observation Time Point
+        single_obs_metrics = calculate_single_observation_metrics(raw_preds, target_threshold)
+        metrics['single_obs'] = single_obs_metrics
+
         return metrics, report_df
+
+
+def calculate_single_observation_metrics(raw_preds, threshold):
+    """
+    Computes metrics for the final single observation time point of each disk.
+    Evaluates the last prediction in `preds` against `threshold`.
+    """
+    tp, fp, fn, tn = 0, 0, 0, 0
+    for disk in raw_preds:
+        has_failed = disk['has_failed']
+        preds = disk['preds']
+        if len(preds) == 0:
+            continue
+        last_pred_score = float(preds[-1])
+        is_positive_pred = (last_pred_score >= threshold)
+        if has_failed:
+            if is_positive_pred:
+                tp += 1
+            else:
+                fn += 1
+        else:
+            if is_positive_pred:
+                fp += 1
+            else:
+                tn += 1
+
+    precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+    far = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
+
+    return {
+        'tp': tp,
+        'fp': fp,
+        'fn': fn,
+        'tn': tn,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'far': far
+    }
 
 
 def analyze_report(report_df, threshold=None):
@@ -400,11 +446,14 @@ def save_lead_time_distribution(report_df, save_dir: str, filename_prefix: str =
     return lt_csv_path, plot_path
 
 
-def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, save_dir: str, filename_prefix: str = "evaluation"):
+def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, save_dir: str, filename_prefix: str = "evaluation", single_obs_metrics: dict = None):
     """
-    Concatenates Row-level (Sample-wise) and Disk-level (Entity-wise) confusion matrices
+    Concatenates Row-level (Sample-wise), Disk-level (Entity-wise), and Single-Observation confusion matrices
     into a single structured report and saves it as CSV.
     """
+    if single_obs_metrics is None:
+        single_obs_metrics = disk_metrics.get('single_obs', {})
+
     os.makedirs(save_dir, exist_ok=True)
     csv_path = os.path.join(save_dir, f"{filename_prefix}_concatenated_confusion_matrix.csv")
 
@@ -432,6 +481,18 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
             'F1_Score': f"{disk_metrics.get('f1', 0.0):.4f}",
             'FAR': f"{disk_metrics.get('far', 0.0):.4f}",
             'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Median LT: {disk_metrics.get('median_lead_time', 0.0):.2f}d | EDR@15: {disk_metrics.get('edr_15', 0.0):.4f}"
+        },
+        {
+            'Evaluation_Level': 'Single-Observation (Final Time-Point)',
+            'TN': single_obs_metrics.get('tn', 0),
+            'FP': single_obs_metrics.get('fp', 0),
+            'FN': single_obs_metrics.get('fn', 0),
+            'TP': single_obs_metrics.get('tp', 0),
+            'Precision': f"{single_obs_metrics.get('precision', 0.0):.4f}",
+            'Recall': f"{single_obs_metrics.get('recall', 0.0):.4f}",
+            'F1_Score': f"{single_obs_metrics.get('f1', 0.0):.4f}",
+            'FAR': f"{single_obs_metrics.get('far', 0.0):.4f}",
+            'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Single-Obs Final Date"
         }
     ]
 
@@ -439,7 +500,7 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
     df_concat.to_csv(csv_path, index=False, encoding='utf-8-sig')
 
     print("\n" + "="*70)
-    print("[SUMMARY] CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT")
+    print("[SUMMARY] CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT (3 EVALUATION METHODS)")
     print("="*70)
     print(df_concat.to_string(index=False))
     print("="*70)
@@ -451,16 +512,31 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
 _MASTER_CSV_KEY_COLS = ['Model', '데이터', '불균형 처리', '첫날포함여부', 'Seed', 'Lead Time']
 
 
+def _normalize_key_val(val):
+    """Normalizes key values (float vs int vs string) for exact matching."""
+    if pd.isna(val):
+        return ""
+    try:
+        f = float(val)
+        if f.is_integer():
+            return str(int(f))
+        return str(f)
+    except (ValueError, TypeError):
+        return str(val).strip().lower()
+
+
 def _clean_and_dedup_rows(df: pd.DataFrame, new_row: pd.DataFrame) -> pd.DataFrame:
-    """Drop stray blank rows and any existing row matching the same experiment key
-    as `new_row` (so re-running a cached checkpoint replaces its old log entry
-    instead of appending a duplicate), then append `new_row`."""
+    """Drop stray blank rows and replace any existing row matching the exact same experiment key
+    (Model, Dataset, Imbalance, FirstDay, Seed, LeadTime). Strictly PRESERVES all runs with different
+    seeds or settings so previous experiment results are NEVER lost."""
     df = df.dropna(how='all')
     if not df.empty and all(c in df.columns for c in _MASTER_CSV_KEY_COLS):
         new_key = new_row.iloc[0]
         mask = pd.Series(True, index=df.index)
         for c in _MASTER_CSV_KEY_COLS:
-            mask &= (df[c].astype(str) == str(new_key[c]))
+            target_norm = _normalize_key_val(new_key[c])
+            col_norm = df[c].apply(_normalize_key_val)
+            mask &= (col_norm == target_norm)
         df = df[~mask]
     return pd.concat([df, new_row], ignore_index=True)
 
@@ -472,21 +548,23 @@ def append_master_experiment_result(
     drop_failure_day: bool,
     row_metrics: dict,
     disk_metrics: dict,
+    single_obs_metrics: dict = None,
     seed: int = None,
     lead_time: int = None,
     master_csv_path: str = None
 ):
     """
     Permanently appends experiment run metrics to a master CSV file.
+    Logs all 3 evaluation methods (Row-level, Disk-level rolling, Single-observation).
     Re-running the exact same (model, dataset, imbalance, drop_failure_day, seed, lead_time)
-    combination -- e.g. because a cached checkpoint was reused -- replaces the previous row for
-    that combination in place instead of appending a duplicate.
-    If the master CSV file is locked by Excel (PermissionError), automatically saves to a temporary backup file
-    (results/backup_master_results.csv) and auto-syncs with UTF-8 BOM encoding when Excel is closed on the next run!
+    combination replaces the previous row in place instead of appending a duplicate.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(project_root, "results")
     os.makedirs(results_dir, exist_ok=True)
+
+    if single_obs_metrics is None:
+        single_obs_metrics = disk_metrics.get('single_obs', {})
 
     if master_csv_path is None:
         master_csv_path = os.path.join(results_dir, "master_experiment_results.csv")
@@ -504,18 +582,28 @@ def append_master_experiment_result(
         '첫날포함여부': first_day_status,
         'Seed': seed,
         'Lead Time': lead_time,
+
+        # 1. Row-Level Evaluation (행 단위)
         'Row Precision': round(float(row_metrics.get('precision', 0.0)), 4),
         'Row Recall': round(float(row_metrics.get('recall', 0.0)), 4),
         'Row F1': round(float(row_metrics.get('f1', 0.0)), 4),
         'Row PR-AUC': round(float(row_metrics.get('pr_auc', 0.0)), 4),
         'Row FAR (%)': round(float(row_metrics.get('far', 0.0)) * 100, 2),
+
+        # 2. Disk-Level Rolling Evaluation (개체 롤링 단위)
         'Threshold': round(float(disk_metrics.get('threshold', 0.5)), 4),
         'Disk-level Precision': round(float(disk_metrics.get('precision', 0.0)), 4),
         'Disk-level Recall': round(float(disk_metrics.get('recall', 0.0)), 4),
         'F1-score': round(float(disk_metrics.get('f1', 0.0)), 4),
         'Disk-level FAR (%)': round(float(disk_metrics.get('far', 0.0)) * 100, 2),
         'Median Lead Time': round(float(disk_metrics.get('median_lead_time', 0.0)), 2),
-        'EDR@15': round(float(disk_metrics.get('edr_15', 0.0)), 4)
+        'EDR@15': round(float(disk_metrics.get('edr_15', 0.0)), 4),
+
+        # 3. Single-Observation Evaluation (단일 시점 평가)
+        'Single-Obs Precision': round(float(single_obs_metrics.get('precision', 0.0)), 4),
+        'Single-Obs Recall': round(float(single_obs_metrics.get('recall', 0.0)), 4),
+        'Single-Obs F1': round(float(single_obs_metrics.get('f1', 0.0)), 4),
+        'Single-Obs FAR (%)': round(float(single_obs_metrics.get('far', 0.0)) * 100, 2)
     }
 
     df_row = pd.DataFrame([row_data])
