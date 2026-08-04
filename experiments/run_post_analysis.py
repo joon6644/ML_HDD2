@@ -64,7 +64,6 @@ def run_post_analysis(checkpoint_path=None, model_name=None, imbalance_strategy=
     ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
     if checkpoint_path is not None and os.path.exists(checkpoint_path):
         print(f"\n[Step 2] Loading explicit checkpoint from: {checkpoint_path}")
-        payload = torch.load(checkpoint_path, map_location='cpu') if torch is not None else None
         model = load_checkpoint(
             model_name, imbalance_strategy, seed, lead_time, dataset_path,
             input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size

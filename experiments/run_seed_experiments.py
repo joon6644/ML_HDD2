@@ -7,7 +7,7 @@ import time
 # ------------------------------------------------------------------------------
 # 1. 기본 실험 설정 (시드 43~45 반복)
 # ------------------------------------------------------------------------------
-DEFAULT_SEEDS = [43, 44, 45, 46]
+DEFAULT_SEEDS = [42]
 DEFAULT_DATASETS = [
     'ST12000NM0007',
     'HGST_20HUH721212ALN604',
@@ -39,10 +39,6 @@ def run_seed_experiments():
     exp_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.dirname(exp_dir)
     run_exp_script = os.path.join(exp_dir, "run_experiment.py")
-    # NOTE: run_single_observation_eval.py is NOT called here.
-    # Single-obs evaluation is computed inside run_experiment.py using the same
-    # val-set threshold (opt_threshold) as row-level and disk-level evaluations.
-    # This guarantees ONE unified threshold per (model, dataset, seed) across all 3 methods.
 
     # 1. 전체 실행 계획 수립
     total_planned = 0

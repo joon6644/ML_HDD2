@@ -13,6 +13,7 @@ from data_loader import load_dataset, create_binary_target, build_sequences
 from imbalance import apply_imbalance_treatment, validate_config_compatibility, EasyEnsembleHandler, EasyEnsembleModelWrapper, SUPPORTED_STRATEGIES
 from evaluator import (
     calculate_row_level_metrics,
+    find_best_threshold_row_level,
     RollingEvaluator,
     save_concatenated_confusion_matrices,
     save_lead_time_distribution,
@@ -177,42 +178,48 @@ def main():
         seed=args.seed
     )
 
-    # 1) Search optimal decision threshold on Validation Set (No data leakage)
-    print("\n[Search] Finding optimal decision threshold on Validation Set (Recall Maximization under FAR <= 1%)...")
-    val_raw_preds = evaluator.get_raw_predictions(val_df, sample_size=args.sample_size, lead_time=args.lead_time)
-    opt_threshold, max_val_recall = evaluator.find_best_threshold(val_raw_preds, max_far=getattr(config, 'MAX_FAR', 0.01), lead_time=args.lead_time)
-    print(f"[Optimal Threshold] Found on Val Set: {opt_threshold:.4f} (Max Val Recall @ FAR <= 1%: {max_val_recall:.4%})")
+    # Helper: compute row-level predicted probabilities for a given feature matrix,
+    # shared between Validation (threshold search) and Test (final evaluation).
+    def _predict_row_probs(X_seq_or_2d):
+        if is_sequence_model:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if hasattr(model, 'predict_proba'):
+                return model.predict_proba(X_seq_or_2d)[:, 1]
+            model.eval()
+            with torch.no_grad():
+                logits = []
+                batch_size = 16384
+                for i in range(0, len(X_seq_or_2d), batch_size):
+                    bx = X_seq_or_2d[i:i+batch_size].to(device)
+                    logits.append(model(bx).cpu())
+                return torch.sigmoid(torch.cat(logits)).numpy().flatten()
+        else:
+            if hasattr(model, 'predict_proba'):
+                probs = model.predict_proba(X_seq_or_2d)[:, 1]
+            elif hasattr(model, 'predict'):
+                probs = model.predict(X_seq_or_2d)
+                if probs.ndim > 1:
+                    probs = probs[:, 1]
+            elif isinstance(model, torch.nn.Module):
+                model.eval()
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                with torch.no_grad():
+                    X_t = torch.tensor(X_seq_or_2d, dtype=torch.float32).to(device)
+                    probs = torch.sigmoid(model(X_t)).cpu().numpy().flatten()
+            return probs
+
+    # 1) Search optimal decision threshold on Validation Set, Row-Level (Sample-wise),
+    # Recall-Maximization under FAR <= 1% Constraint. No data leakage (val set only).
+    print("\n[Search] Finding optimal decision threshold on Validation Set, Row-Level (Recall Maximization under FAR <= 1%)...")
+    val_probs = _predict_row_probs(X_val_seq if is_sequence_model else X_val_2d)
+    y_val_np = y_val_seq.numpy() if is_sequence_model else y_val
+    opt_threshold, max_val_recall = find_best_threshold_row_level(y_val_np, val_probs, max_far=getattr(config, 'MAX_FAR', 0.01))
+    print(f"[Optimal Threshold] Found on Val Set (Row-Level): {opt_threshold:.4f} (Max Val Recall @ FAR <= 1%: {max_val_recall:.4%})")
 
     # A. Row-Level Evaluation (Using Validation-Optimal Threshold)
     print("\n--- 1. [ROW-LEVEL (SAMPLE-WISE) EVALUATION] ---")
-    if is_sequence_model:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if hasattr(model, 'predict_proba'):
-            test_probs = model.predict_proba(X_test_seq)[:, 1]
-        else:
-            model.eval()
-            with torch.no_grad():
-                test_logits = []
-                batch_size = 16384
-                for i in range(0, len(X_test_seq), batch_size):
-                    bx = X_test_seq[i:i+batch_size].to(device)
-                    test_logits.append(model(bx).cpu())
-                test_probs = torch.sigmoid(torch.cat(test_logits)).numpy().flatten()
-        row_metrics = calculate_row_level_metrics(y_test_seq.numpy(), test_probs, threshold=opt_threshold)
-    else:
-        if hasattr(model, 'predict_proba'):
-            test_probs = model.predict_proba(X_test_2d)[:, 1]
-        elif hasattr(model, 'predict'):
-            test_probs = model.predict(X_test_2d)
-            if test_probs.ndim > 1:
-                test_probs = test_probs[:, 1]
-        elif isinstance(model, torch.nn.Module):
-            model.eval()
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            with torch.no_grad():
-                X_test_t = torch.tensor(X_test_2d, dtype=torch.float32).to(device)
-                test_probs = torch.sigmoid(model(X_test_t)).cpu().numpy().flatten()
-        row_metrics = calculate_row_level_metrics(y_test, test_probs, threshold=opt_threshold)
+    test_probs = _predict_row_probs(X_test_seq if is_sequence_model else X_test_2d)
+    row_metrics = calculate_row_level_metrics(y_test_seq.numpy() if is_sequence_model else y_test, test_probs, threshold=opt_threshold)
 
     print(f"  Threshold Used   : {opt_threshold:.4f}")
     print(f"  Confusion Matrix : TN={row_metrics['tn']:,}, FP={row_metrics['fp']:,}, FN={row_metrics['fn']:,}, TP={row_metrics['tp']:,}")
@@ -264,7 +271,6 @@ def main():
                 drop_failure_day=args.drop_failure_day,
                 row_metrics=row_metrics,
                 disk_metrics=disk_metrics,
-                single_obs_metrics=disk_metrics.get('single_obs', {}),
                 seed=args.seed,
                 lead_time=args.lead_time
             )

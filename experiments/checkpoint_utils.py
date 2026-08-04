@@ -115,7 +115,7 @@ def load_checkpoint(model_name: str, imbalance: str, seed: int, lead_time: int, 
 
     print(f"\n[Checkpoint Manager] Found existing checkpoint: {ckpt_path}")
     print(f"[Checkpoint Manager] Loading pre-trained model weights directly (Skipping training)...")
-    payload = torch.load(ckpt_path, map_location='cpu')
+    payload = torch.load(ckpt_path, map_location='cpu', weights_only=False)
     _validate_checkpoint_compatibility(payload, ckpt_path, features=features, window_size=window_size)
 
     ckpt_type = payload.get("type")

@@ -16,6 +16,54 @@ from tqdm import tqdm
 import config
 
 
+def find_best_threshold_row_level(y_true, y_prob, max_far=0.01):
+    """
+    Find the threshold that maximizes Row-Level (sample-wise) Recall subject to
+    Row-Level FAR <= max_far (default 1%) on the given (y_true, y_prob) set.
+    If no threshold satisfies FAR <= max_far, returns the threshold that minimizes FAR
+    (ties broken by maximizing Recall).
+    """
+    y_true = np.asarray(y_true)
+    y_prob = np.asarray(y_prob)
+
+    thresholds = np.linspace(0.01, 0.99, 99)
+    n_pos = np.sum(y_true == 1)
+    n_neg = np.sum(y_true == 0)
+
+    best_recall = -1.0
+    best_far = 2.0
+    best_threshold = 0.5
+
+    fallback_threshold = 0.5
+    fallback_min_far = 2.0
+    fallback_max_recall = -1.0
+
+    for thresh in thresholds:
+        y_pred = (y_prob >= thresh).astype(int)
+        tp = np.sum((y_pred == 1) & (y_true == 1))
+        fp = np.sum((y_pred == 1) & (y_true == 0))
+
+        recall = float(tp / n_pos) if n_pos > 0 else 0.0
+        far = float(fp / n_neg) if n_neg > 0 else 0.0
+
+        if (far < fallback_min_far) or (far == fallback_min_far and recall > fallback_max_recall):
+            fallback_min_far = far
+            fallback_max_recall = recall
+            fallback_threshold = thresh
+
+        if far <= max_far:
+            if (recall > best_recall) or (recall == best_recall and far < best_far):
+                best_recall = recall
+                best_far = far
+                best_threshold = thresh
+
+    if best_recall < 0:
+        best_threshold = fallback_threshold
+        best_recall = fallback_max_recall
+
+    return float(best_threshold), float(best_recall)
+
+
 def calculate_row_level_metrics(y_true, y_prob, threshold=0.5):
     """
     Computes row-level (sample-wise) classification metrics and confusion matrix:
@@ -301,52 +349,7 @@ class RollingEvaluator:
         metrics = analyze_report(report_df, threshold=target_threshold)
         metrics['threshold'] = target_threshold
 
-        # Evaluation Method 3: Single Observation Time Point
-        single_obs_metrics = calculate_single_observation_metrics(raw_preds, target_threshold)
-        metrics['single_obs'] = single_obs_metrics
-
         return metrics, report_df
-
-
-def calculate_single_observation_metrics(raw_preds, threshold):
-    """
-    Computes metrics for the final single observation time point of each disk.
-    Evaluates the last prediction in `preds` against `threshold`.
-    """
-    tp, fp, fn, tn = 0, 0, 0, 0
-    for disk in raw_preds:
-        has_failed = disk['has_failed']
-        preds = disk['preds']
-        if len(preds) == 0:
-            continue
-        last_pred_score = float(preds[-1])
-        is_positive_pred = (last_pred_score >= threshold)
-        if has_failed:
-            if is_positive_pred:
-                tp += 1
-            else:
-                fn += 1
-        else:
-            if is_positive_pred:
-                fp += 1
-            else:
-                tn += 1
-
-    precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
-    recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
-    f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
-    far = float(fp / (fp + tn)) if (fp + tn) > 0 else 0.0
-
-    return {
-        'tp': tp,
-        'fp': fp,
-        'fn': fn,
-        'tn': tn,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'far': far
-    }
 
 
 def analyze_report(report_df, threshold=None):
@@ -446,14 +449,11 @@ def save_lead_time_distribution(report_df, save_dir: str, filename_prefix: str =
     return lt_csv_path, plot_path
 
 
-def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, save_dir: str, filename_prefix: str = "evaluation", single_obs_metrics: dict = None):
+def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, save_dir: str, filename_prefix: str = "evaluation"):
     """
-    Concatenates Row-level (Sample-wise), Disk-level (Entity-wise), and Single-Observation confusion matrices
+    Concatenates Row-level (Sample-wise) and Disk-level (Entity-wise) confusion matrices
     into a single structured report and saves it as CSV.
     """
-    if single_obs_metrics is None:
-        single_obs_metrics = disk_metrics.get('single_obs', {})
-
     os.makedirs(save_dir, exist_ok=True)
     csv_path = os.path.join(save_dir, f"{filename_prefix}_concatenated_confusion_matrix.csv")
 
@@ -481,18 +481,6 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
             'F1_Score': f"{disk_metrics.get('f1', 0.0):.4f}",
             'FAR': f"{disk_metrics.get('far', 0.0):.4f}",
             'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Median LT: {disk_metrics.get('median_lead_time', 0.0):.2f}d | EDR@15: {disk_metrics.get('edr_15', 0.0):.4f}"
-        },
-        {
-            'Evaluation_Level': 'Single-Observation (Final Time-Point)',
-            'TN': single_obs_metrics.get('tn', 0),
-            'FP': single_obs_metrics.get('fp', 0),
-            'FN': single_obs_metrics.get('fn', 0),
-            'TP': single_obs_metrics.get('tp', 0),
-            'Precision': f"{single_obs_metrics.get('precision', 0.0):.4f}",
-            'Recall': f"{single_obs_metrics.get('recall', 0.0):.4f}",
-            'F1_Score': f"{single_obs_metrics.get('f1', 0.0):.4f}",
-            'FAR': f"{single_obs_metrics.get('far', 0.0):.4f}",
-            'Additional_Details': f"Threshold: {disk_metrics.get('threshold', 0.5):.4f} | Single-Obs Final Date"
         }
     ]
 
@@ -500,7 +488,7 @@ def save_concatenated_confusion_matrices(row_metrics: dict, disk_metrics: dict, 
     df_concat.to_csv(csv_path, index=False, encoding='utf-8-sig')
 
     print("\n" + "="*70)
-    print("[SUMMARY] CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT (3 EVALUATION METHODS)")
+    print("[SUMMARY] CONCATENATED CONFUSION MATRIX & EVALUATION SUMMARY REPORT (2 EVALUATION METHODS)")
     print("="*70)
     print(df_concat.to_string(index=False))
     print("="*70)
@@ -548,23 +536,19 @@ def append_master_experiment_result(
     drop_failure_day: bool,
     row_metrics: dict,
     disk_metrics: dict,
-    single_obs_metrics: dict = None,
     seed: int = None,
     lead_time: int = None,
     master_csv_path: str = None
 ):
     """
     Permanently appends experiment run metrics to a master CSV file.
-    Logs all 3 evaluation methods (Row-level, Disk-level rolling, Single-observation).
+    Logs both evaluation methods (Row-level, Disk-level rolling).
     Re-running the exact same (model, dataset, imbalance, drop_failure_day, seed, lead_time)
     combination replaces the previous row in place instead of appending a duplicate.
     """
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(project_root, "results")
     os.makedirs(results_dir, exist_ok=True)
-
-    if single_obs_metrics is None:
-        single_obs_metrics = disk_metrics.get('single_obs', {})
 
     if master_csv_path is None:
         master_csv_path = os.path.join(results_dir, "master_experiment_results.csv")
@@ -598,12 +582,6 @@ def append_master_experiment_result(
         'Disk-level FAR (%)': round(float(disk_metrics.get('far', 0.0)) * 100, 2),
         'Median Lead Time': round(float(disk_metrics.get('median_lead_time', 0.0)), 2),
         'EDR@15': round(float(disk_metrics.get('edr_15', 0.0)), 4),
-
-        # 3. Single-Observation Evaluation (단일 시점 평가)
-        'Single-Obs Precision': round(float(single_obs_metrics.get('precision', 0.0)), 4),
-        'Single-Obs Recall': round(float(single_obs_metrics.get('recall', 0.0)), 4),
-        'Single-Obs F1': round(float(single_obs_metrics.get('f1', 0.0)), 4),
-        'Single-Obs FAR (%)': round(float(single_obs_metrics.get('far', 0.0)) * 100, 2)
     }
 
     df_row = pd.DataFrame([row_data])
