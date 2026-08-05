@@ -11,15 +11,17 @@ except ImportError:
 import config
 
 DL_MODELS = {'mlp', 'lstm', 'gru'}
+_DATASET_CACHE = {}
 
 
-def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_day_in_train: bool = None, model: str = None):
+def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_day_in_train: bool = None, model: str = None, use_cache: bool = True):
     """
     Loads train, validation, and test datasets dynamically from parquet files in the target directory.
     Constructs the binary target label for 30-day failure classification.
     Optionally drops failure day (RUL == 0) samples from train_df if requested.
     Standardizes features (fit on train only, clipped to [-10, 10]) when `model` is a
     deep learning architecture (mlp/lstm/gru); tree-based models receive raw features.
+    Caches raw datasets in memory across consecutive calls for faster experiment runs.
     """
     if splitted_dir is None:
         splitted_dir = config.DATASET_DIR
@@ -33,68 +35,77 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
     if not os.path.exists(splitted_dir):
         raise FileNotFoundError(f"Dataset directory does not exist: '{splitted_dir}'")
 
-    # Discover train, val, test parquet files (sorted for deterministic selection
-    # if a directory ever ends up with more than one file matching a pattern)
-    files = sorted(os.listdir(splitted_dir))
-    train_candidates = [f for f in files if f.endswith('_train.parquet') or f == 'train.parquet']
-    val_candidates = [f for f in files if f.endswith('_val.parquet') or f == 'val.parquet']
-    test_candidates = [f for f in files if f.endswith('_test.parquet') or f == 'test.parquet']
+    cache_key = (os.path.abspath(splitted_dir), lead_time, drop_failure_day_in_train)
+    if use_cache and cache_key in _DATASET_CACHE:
+        print(f"[Data Loader Cache HIT] Reusing in-memory preloaded dataset for: {splitted_dir}")
+        raw_train, raw_val, raw_test, features = _DATASET_CACHE[cache_key]
+        train_df, val_df, test_df = raw_train.copy(), raw_val.copy(), raw_test.copy()
+    else:
+        # Discover train, val, test parquet files (sorted for deterministic selection
+        # if a directory ever ends up with more than one file matching a pattern)
+        files = sorted(os.listdir(splitted_dir))
+        train_candidates = [f for f in files if f.endswith('_train.parquet') or f == 'train.parquet']
+        val_candidates = [f for f in files if f.endswith('_val.parquet') or f == 'val.parquet']
+        test_candidates = [f for f in files if f.endswith('_test.parquet') or f == 'test.parquet']
 
-    if not train_candidates or not val_candidates or not test_candidates:
-        raise FileNotFoundError(
-            f"Could not find valid *_train.parquet, *_val.parquet, and *_test.parquet files in '{splitted_dir}'. "
-            f"A distinct test set is required to avoid evaluating on the same data used for threshold tuning. "
-            f"Directory contains: {files}"
-        )
-    for name, candidates in [("train", train_candidates), ("val", val_candidates), ("test", test_candidates)]:
-        if len(candidates) > 1:
-            print(f"[Warning] Multiple candidate {name} files found in '{splitted_dir}': {candidates}. "
-                  f"Using '{candidates[0]}' (alphabetically first) for determinism.")
+        if not train_candidates or not val_candidates or not test_candidates:
+            raise FileNotFoundError(
+                f"Could not find valid *_train.parquet, *_val.parquet, and *_test.parquet files in '{splitted_dir}'. "
+                f"A distinct test set is required to avoid evaluating on the same data used for threshold tuning. "
+                f"Directory contains: {files}"
+            )
+        for name, candidates in [("train", train_candidates), ("val", val_candidates), ("test", test_candidates)]:
+            if len(candidates) > 1:
+                print(f"[Warning] Multiple candidate {name} files found in '{splitted_dir}': {candidates}. "
+                      f"Using '{candidates[0]}' (alphabetically first) for determinism.")
 
-    train_file, val_file, test_file = train_candidates[0], val_candidates[0], test_candidates[0]
-    train_path = os.path.join(splitted_dir, train_file)
-    val_path = os.path.join(splitted_dir, val_file)
-    test_path = os.path.join(splitted_dir, test_file)
+        train_file, val_file, test_file = train_candidates[0], val_candidates[0], test_candidates[0]
+        train_path = os.path.join(splitted_dir, train_file)
+        val_path = os.path.join(splitted_dir, val_file)
+        test_path = os.path.join(splitted_dir, test_file)
 
-    print(f"Loading datasets from: {splitted_dir}")
-    train_df = pd.read_parquet(train_path)
-    val_df = pd.read_parquet(val_path)
-    test_df = pd.read_parquet(test_path)
+        print(f"Loading datasets from: {splitted_dir}")
+        train_df = pd.read_parquet(train_path)
+        val_df = pd.read_parquet(val_path)
+        test_df = pd.read_parquet(test_path)
 
-    # Trim the trailing `lead_time` days of HDD units whose observation ends
-    # normally (censored == 1: covers both mid-life dropout and simply
-    # reaching the dataset's last observed date). RUL counts down to 0 at
-    # that cutoff, so those final `lead_time` days carry an unverifiable
-    # "no failure" label -- the disk could have failed shortly after
-    # observation stopped, we just never got to see it.
-    def _trim_censored_tail(df: pd.DataFrame, name: str) -> pd.DataFrame:
-        drop_mask = (df['censored'] == 1) & (df['RUL'] < lead_time)
-        dropped = int(drop_mask.sum())
-        if dropped == 0:
-            return df
-        print(f"[Data Loader] Trimmed last {lead_time} days of censored (non-failed) HDD units "
-              f"from {name.upper()} set: {dropped:,} rows dropped.")
-        return df[~drop_mask].copy()
+        # Trim the trailing `lead_time` days of HDD units whose observation ends
+        # normally (censored == 1: covers both mid-life dropout and simply
+        # reaching the dataset's last observed date). RUL counts down to 0 at
+        # that cutoff, so those final `lead_time` days carry an unverifiable
+        # "no failure" label -- the disk could have failed shortly after
+        # observation stopped, we just never got to see it.
+        def _trim_censored_tail(df: pd.DataFrame, name: str) -> pd.DataFrame:
+            drop_mask = (df['censored'] == 1) & (df['RUL'] < lead_time)
+            dropped = int(drop_mask.sum())
+            if dropped == 0:
+                return df
+            print(f"[Data Loader] Trimmed last {lead_time} days of censored (non-failed) HDD units "
+                  f"from {name.upper()} set: {dropped:,} rows dropped.")
+            return df[~drop_mask].copy()
 
-    train_df = _trim_censored_tail(train_df, "train")
-    val_df = _trim_censored_tail(val_df, "val")
-    test_df = _trim_censored_tail(test_df, "test")
+        train_df = _trim_censored_tail(train_df, "train")
+        val_df = _trim_censored_tail(val_df, "val")
+        test_df = _trim_censored_tail(test_df, "test")
 
-    # Option to drop failure day (RUL == 0) samples from training set only
-    if drop_failure_day_in_train:
-        before_count = len(train_df)
-        train_df = train_df[train_df['RUL'] > 0].copy()
-        dropped_count = before_count - len(train_df)
-        print(f"[Data Loader] Filtered out failure-day (RUL == 0) samples from TRAIN set: {dropped_count:,} rows dropped.")
+        # Option to drop failure day (RUL == 0) samples from training set only
+        if drop_failure_day_in_train:
+            before_count = len(train_df)
+            train_df = train_df[train_df['RUL'] > 0].copy()
+            dropped_count = before_count - len(train_df)
+            print(f"[Data Loader] Filtered out failure-day (RUL == 0) samples from TRAIN set: {dropped_count:,} rows dropped.")
 
-    exclude_cols = config.EXCLUDE_COLS
-    features = [c for c in train_df.columns if c not in exclude_cols]
+        exclude_cols = config.EXCLUDE_COLS
+        features = [c for c in train_df.columns if c not in exclude_cols]
 
-    for df in [train_df, val_df, test_df]:
-        for col in features:
-            if df[col].dtype != 'float32':
-                df[col] = df[col].astype('float32')
-        df[features] = df[features].fillna(0)
+        for df in [train_df, val_df, test_df]:
+            for col in features:
+                if df[col].dtype != 'float32':
+                    df[col] = df[col].astype('float32')
+            df[features] = df[features].fillna(0)
+
+        if use_cache:
+            _DATASET_CACHE[cache_key] = (train_df.copy(), val_df.copy(), test_df.copy(), features)
 
     # Standardize features for deep learning models only (tree-based models
     # don't need it). Fit strictly on train to avoid leakage, then apply the

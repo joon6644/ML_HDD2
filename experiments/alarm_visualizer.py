@@ -70,13 +70,13 @@ class AlarmLifetimeVisualizer:
         Generates and saves Lead Time Distribution Plot for Hit Alarms.
         """
         os.makedirs(save_dir, exist_ok=True)
-        hit_disks = self.stats_df[self.stats_df['is_hit'] == True].copy()
-        lead_times = hit_disks['days_to_failure_at_alarm'].dropna().values
+        alarm_failed_disks = self.stats_df[(self.stats_df['is_failed_bool'] == True) & (self.stats_df['total_alarm_count'] > 0)].copy()
+        lead_times = alarm_failed_disks['days_to_failure_at_alarm'].dropna().values
 
         # 1. Save Lead Time Distribution Data CSV
         lt_csv_path = os.path.join(save_dir, f"{filename_prefix}_lead_time_distribution.csv")
         cols_to_save = ['serial_number', 'failure_date', 'first_alarm_date', 'days_to_failure_at_alarm', 'total_alarm_count']
-        hit_disks[cols_to_save].to_csv(lt_csv_path, index=False, encoding='utf-8-sig')
+        alarm_failed_disks[cols_to_save].to_csv(lt_csv_path, index=False, encoding='utf-8-sig')
 
         # 2. Plot Lead Time Distribution
         plot_path = os.path.join(save_dir, f"{filename_prefix}_lead_time_plot.png")

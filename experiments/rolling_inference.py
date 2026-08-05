@@ -197,7 +197,7 @@ class RollingEvaluator:
                 if has_failed:
                     days_to_failure = (failure_date - first_alarm_date).days
                     # Hit: Alarm within the specified lead time before failure
-                    if 0 <= days_to_failure <= lead_time:
+                    if days_to_failure >= 0:
                         is_hit = 1
                     else:
                         is_miss = 1  # Alarm triggered, but too early or after failure
@@ -259,7 +259,7 @@ class RollingEvaluator:
                     first_alarm_idx = np.where(alarm_mask)[0][0]
                     first_alarm_date = pd.to_datetime(disk['dates'][first_alarm_idx])
                     days_to_failure = (disk['failure_date'] - first_alarm_date).days
-                    if 0 <= days_to_failure <= lead_time:
+                    if days_to_failure >= 0:
                         hits += 1
                 else:
                     false_alarms += 1
@@ -343,9 +343,9 @@ def analyze_and_save_report(report_df, output_csv_path=None, threshold=None):
     precision = hits / (hits + false_alarms) if (hits + false_alarms) > 0 else 0.0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    # Lead time statistics
-    hit_rows = report_df[report_df['is_hit'] == 1]
-    lead_times = hit_rows['days_to_failure_at_alarm'].dropna().values
+    # Lead time statistics across all failed HDDs that triggered an alarm
+    all_alarm_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
+    lead_times = all_alarm_failed_rows['days_to_failure_at_alarm'].dropna().values
     
     mean_lt = np.mean(lead_times) if len(lead_times) > 0 else 0.0
     median_lt = np.median(lead_times) if len(lead_times) > 0 else 0.0

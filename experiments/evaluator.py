@@ -214,10 +214,7 @@ class RollingEvaluator:
             })
         return raw_preds
 
-    def build_report_from_raw_predictions(self, raw_preds, threshold, lead_time=None):
-        if lead_time is None:
-            lead_time = config.TARGET_LEAD_TIME
-
+    def build_report_from_raw_predictions(self, raw_preds, threshold):
         records = []
         for disk in raw_preds:
             serial = disk['serial_number']
@@ -243,7 +240,7 @@ class RollingEvaluator:
                 alarm_score = float(preds[first_alarm_idx])
                 if has_failed:
                     days_to_failure = (failure_date - first_alarm_date).days
-                    if 0 <= days_to_failure <= lead_time:
+                    if days_to_failure >= 0:
                         is_hit = 1
                     else:
                         is_miss = 1
@@ -271,15 +268,14 @@ class RollingEvaluator:
             })
         return pd.DataFrame(records)
 
-    def find_best_threshold(self, raw_preds, max_far=None, lead_time=None):
+    def find_best_threshold(self, raw_preds, max_far=None):
         """
         Find the threshold that maximizes Recall on raw predictions subject to FAR <= max_far (default 1%).
         If no threshold satisfies FAR <= max_far, returns the threshold that minimizes FAR.
+        Hits are counted for any alarm triggered on or before the failure date.
         """
         if max_far is None:
             max_far = getattr(config, 'MAX_FAR', 0.01)
-        if lead_time is None:
-            lead_time = config.TARGET_LEAD_TIME
 
         thresholds = np.linspace(0.01, 0.99, 99)
         best_recall = -1.0
@@ -305,7 +301,7 @@ class RollingEvaluator:
                     first_alarm_idx = np.where(alarm_mask)[0][0]
                     first_alarm_date = pd.to_datetime(disk['dates'][first_alarm_idx])
                     days_to_failure = (disk['failure_date'] - first_alarm_date).days
-                    if 0 <= days_to_failure <= lead_time:
+                    if days_to_failure >= 0:
                         hits += 1
                 else:
                     false_alarms += 1
@@ -332,20 +328,18 @@ class RollingEvaluator:
 
         return float(best_threshold), float(best_recall)
 
-    def evaluate_alarms(self, val_df, threshold='auto', max_far=None, lead_time=None, sample_size=None):
+    def evaluate_alarms(self, val_df, threshold='auto', max_far=None, sample_size=None):
         if max_far is None:
             max_far = getattr(config, 'MAX_FAR', 0.01)
-        if lead_time is None:
-            lead_time = config.TARGET_LEAD_TIME
 
-        raw_preds = self.get_raw_predictions(val_df, sample_size=sample_size, lead_time=lead_time)
+        raw_preds = self.get_raw_predictions(val_df, sample_size=sample_size)
         if threshold == 'auto':
-            target_threshold, max_val_recall = self.find_best_threshold(raw_preds, max_far=max_far, lead_time=lead_time)
+            target_threshold, max_val_recall = self.find_best_threshold(raw_preds, max_far=max_far)
             print(f"Optimal threshold found: {target_threshold:.4f} (Max Recall @ FAR <= {max_far:.2%}: {max_val_recall:.4%})")
         else:
             target_threshold = float(threshold)
             
-        report_df = self.build_report_from_raw_predictions(raw_preds, target_threshold, lead_time=lead_time)
+        report_df = self.build_report_from_raw_predictions(raw_preds, target_threshold)
         metrics = analyze_report(report_df, threshold=target_threshold)
         metrics['threshold'] = target_threshold
 
@@ -369,8 +363,8 @@ def analyze_report(report_df, threshold=None):
     precision = float(hits / (hits + false_alarms)) if (hits + false_alarms) > 0 else 0.0
     f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
-    hit_rows = report_df[report_df['is_hit'] == 1]
-    lead_times = hit_rows['days_to_failure_at_alarm'].dropna().values
+    all_alarm_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
+    lead_times = all_alarm_failed_rows['days_to_failure_at_alarm'].dropna().values
     
     mean_lt = float(np.mean(lead_times)) if len(lead_times) > 0 else 0.0
     median_lt = float(np.median(lead_times)) if len(lead_times) > 0 else 0.0
@@ -414,8 +408,8 @@ def save_lead_time_distribution(report_df, save_dir: str, filename_prefix: str =
     Saves lead time distribution per-disk data as CSV and generates a high-quality visualization plot PNG.
     """
     os.makedirs(save_dir, exist_ok=True)
-    hit_disks = report_df[report_df['is_hit'] == 1].copy()
-    lead_times = hit_disks['days_to_failure_at_alarm'].dropna().values
+    alarm_failed_disks = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)].copy()
+    lead_times = alarm_failed_disks['days_to_failure_at_alarm'].dropna().values
 
     # 1. Save Lead Time Distribution Data CSV
     lt_csv_path = os.path.join(save_dir, f"{filename_prefix}_lead_time_distribution.csv")

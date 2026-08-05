@@ -77,26 +77,31 @@ def main():
     # 1. Load Data
     train_df, val_df, test_df, features = load_dataset(args.data, drop_failure_day_in_train=args.drop_failure_day, model=args.model)
     
-    # 2. Build Features
-    if is_sequence_model:
-        window_size = config.WINDOW_SIZE
-        print(f"\n[Step 1] Building 3D sequences (window_size={window_size})...")
-        X_train_seq, y_train_seq = build_sequences(train_df, features, window_size=window_size, lead_time=args.lead_time)
-        X_val_seq, y_val_seq = build_sequences(val_df, features, window_size=window_size, lead_time=args.lead_time)
-        X_test_seq, y_test_seq = build_sequences(test_df, features, window_size=window_size, lead_time=args.lead_time)
-    else:
-        print("\n[Step 1] Preparing 2D tabular features & target...")
-        y_train = create_binary_target(train_df, lead_time=args.lead_time)
-        y_val = create_binary_target(val_df, lead_time=args.lead_time)
-        y_test = create_binary_target(test_df, lead_time=args.lead_time)
-        
-        X_train_2d = train_df[features].values
-        X_val_2d = val_df[features].values
-        X_test_2d = test_df[features].values
-
-    # 3. Train Model (Check Checkpoint First)
+    # 2. Check Checkpoint First
     ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
     cached_model = load_checkpoint(args.model, args.imbalance, args.seed, args.lead_time, args.data, input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size)
+
+    # 3. Build Features (Only build validation and test features for inference if checkpoint exists)
+    if is_sequence_model:
+        window_size = config.WINDOW_SIZE
+        print(f"\n[Step 1] Building Val/Test 3D sequences (window_size={window_size})...")
+        X_val_seq, y_val_seq = build_sequences(val_df, features, window_size=window_size, lead_time=args.lead_time)
+        X_test_seq, y_test_seq = build_sequences(test_df, features, window_size=window_size, lead_time=args.lead_time)
+        if cached_model is None:
+            print(f"[Step 1] Building Train 3D sequences for model training...")
+            X_train_seq, y_train_seq = build_sequences(train_df, features, window_size=window_size, lead_time=args.lead_time)
+    else:
+        print("\n[Step 1] Preparing Val/Test 2D tabular features & target...")
+        y_val = create_binary_target(val_df, lead_time=args.lead_time)
+        y_test = create_binary_target(test_df, lead_time=args.lead_time)
+        X_val_2d = val_df[features].values
+        X_test_2d = test_df[features].values
+        if cached_model is None:
+            print("[Step 1] Preparing Train 2D tabular features & target for model training...")
+            y_train = create_binary_target(train_df, lead_time=args.lead_time)
+            X_train_2d = train_df[features].values
+
+    # 4. Train Model (if not cached)
     if cached_model is not None:
         model = cached_model
         model_type = 'ensemble' if args.imbalance == 'easyensemble' else ('pytorch_class' if is_sequence_model or args.model == 'mlp' else args.model)
@@ -232,7 +237,7 @@ def main():
 
     # 2) Evaluate Test Set using fixed optimal threshold found from Val Set
     print("\n[Evaluation] Evaluating Test Set using fixed Validation-Optimal Threshold...")
-    disk_metrics, report_df = evaluator.evaluate_alarms(test_df, threshold=opt_threshold, lead_time=args.lead_time, sample_size=args.sample_size)
+    disk_metrics, report_df = evaluator.evaluate_alarms(test_df, threshold=opt_threshold, sample_size=args.sample_size)
 
     # 4. Save Experiment Artifacts (Controlled by --save-artifacts / SAVE_EXPERIMENT_ARTIFACTS)
     if args.save_artifacts:
