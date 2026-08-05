@@ -28,7 +28,7 @@ from evaluator import (
 _DATASET_CACHE = {}
 
 def get_cached_dataset(data_path: str, drop_failure_day: bool, model: str):
-    cache_key = (data_path, drop_failure_day)
+    cache_key = (data_path, drop_failure_day, model)
     if cache_key not in _DATASET_CACHE:
         print(f"\n[Data Loader Cache] Loading dataset into RAM: {data_path}...")
         train_df, val_df, test_df, features = load_dataset(data_path, drop_failure_day_in_train=drop_failure_day, model=model)
@@ -124,9 +124,7 @@ def run_proposed_threshold_experiments():
                         X_train_seq, y_train_seq = build_sequences(train_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
                 else:
                     y_val = create_binary_target(val_df, lead_time=config.TARGET_LEAD_TIME)
-                    y_test = create_binary_target(test_df, lead_time=config.TARGET_LEAD_TIME)
                     X_val_2d = val_df[features].values
-                    X_test_2d = test_df[features].values
                     if cached_model is None:
                         y_train = create_binary_target(train_df, lead_time=config.TARGET_LEAD_TIME)
                         X_train_2d = train_df[features].values

@@ -197,7 +197,13 @@ class RollingEvaluator:
         raw_preds = []
         for serial, group in tqdm(grouped, desc="Sequential Disk Inference"):
             has_failed = (group['censored'].iloc[0] == 0)
-            failure_date = pd.to_datetime(group['date'].max()) if has_failed else None
+            if has_failed:
+                rul_zero = group[group['RUL'] == 0]
+                failure_date = pd.to_datetime(
+                    rul_zero['date'].iloc[0] if len(rul_zero) > 0 else group['date'].max()
+                )
+            else:
+                failure_date = None
             dates, y_true, preds = self.predict_disk(group, lead_time=lead_time)
             if len(preds) == 0:
                 continue

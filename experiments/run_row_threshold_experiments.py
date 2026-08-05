@@ -30,7 +30,7 @@ from evaluator import (
 _DATASET_CACHE = {}
 
 def get_cached_dataset(data_path: str, drop_failure_day: bool, model: str):
-    cache_key = (data_path, drop_failure_day)
+    cache_key = (data_path, drop_failure_day, model)
     if cache_key not in _DATASET_CACHE:
         print(f"\n[Data Loader Cache] Loading dataset into RAM: {data_path}...")
         train_df, val_df, test_df, features = load_dataset(data_path, drop_failure_day_in_train=drop_failure_day, model=model)
@@ -125,9 +125,7 @@ def run_row_threshold_experiments():
                         X_train_seq, y_train_seq = build_sequences(train_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
                 else:
                     y_val = create_binary_target(val_df, lead_time=config.TARGET_LEAD_TIME)
-                    y_test = create_binary_target(test_df, lead_time=config.TARGET_LEAD_TIME)
                     X_val_2d = val_df[features].values
-                    X_test_2d = test_df[features].values
                     if cached_model is None:
                         y_train = create_binary_target(train_df, lead_time=config.TARGET_LEAD_TIME)
                         X_train_2d = train_df[features].values
@@ -171,21 +169,12 @@ def run_row_threshold_experiments():
                 print("Performing single sequential inference on Test set...")
                 raw_preds_test = evaluator.get_raw_predictions(test_df)
 
-                # Extract row-level predicted probabilities for Validation & Test
-                if is_sequence_model:
-                    val_probs = np.concatenate([d['preds'] for d in raw_preds_val])
-                    val_y_true = np.concatenate([d['y_true'] for d in raw_preds_val])
-                    test_probs = np.concatenate([d['preds'] for d in raw_preds_test])
-                    test_y_true = np.concatenate([d['y_true'] for d in raw_preds_test])
-                else:
-                    if hasattr(model, 'predict_proba'):
-                        val_probs = model.predict_proba(X_val_2d)[:, 1]
-                        test_probs = model.predict_proba(X_test_2d)[:, 1]
-                    else:
-                        val_probs = model.predict(X_val_2d)
-                        test_probs = model.predict(X_test_2d)
-                    val_y_true = y_val
-                    test_y_true = y_test
+                # Extract row-level probs/y_true from raw_preds (unified path for ALL models)
+                # Guarantees y_true and probs are always in the same order: serial_number -> date sort.
+                val_probs = np.concatenate([d['preds'] for d in raw_preds_val])
+                val_y_true = np.concatenate([d['y_true'] for d in raw_preds_val])
+                test_probs = np.concatenate([d['preds'] for d in raw_preds_test])
+                test_y_true = np.concatenate([d['y_true'] for d in raw_preds_test])
 
                 # D. Search Optimal Threshold on Validation Set (Row-Level)
                 th_row, max_val_rec = find_best_threshold_row_level(val_y_true, val_probs, max_far=config.MAX_FAR)
