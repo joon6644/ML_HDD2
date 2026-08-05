@@ -11,7 +11,11 @@ HYPERPARAMS = {
     "subsample": 0.9,
     "colsample_bytree": 0.9,
     "tree_method": 'hist',
-    "eval_metric": 'logloss',
+    # Early-stopping monitor only (objective stays binary cross-entropy/logistic
+    # internally). 'aucpr' tracks minority-class ranking directly, so it won't
+    # false-plateau under severe imbalance the way 'logloss' can. See lgbm.py for
+    # the matching change and rationale.
+    "eval_metric": 'aucpr',
     "early_stopping_rounds": 20
 }
 

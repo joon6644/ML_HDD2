@@ -108,19 +108,35 @@ def plot_facet_grid(all_sweeps: dict, results_dir: str, seed: int):
             valid = df.dropna(subset=['median_lead_time'])
             valid = valid[valid['hits'] > 0]
             if len(valid) > 0:
-                ax.plot(valid['threshold'], valid['median_lead_time'], color="#2b5c8f", linewidth=1.6, label="Median LT")
+                x = valid['threshold'].values
+                y = valid['median_lead_time'].values
+                n = valid['hits'].values.astype(float)
+
+                ax.plot(x, y, color="#0a1f38", linewidth=2.6, alpha=1.0, label="Median LT", zorder=3)
+
                 ax.fill_between(
-                    valid['threshold'],
-                    valid['median_lead_time'] - valid['std_lead_time'],
-                    valid['median_lead_time'] + valid['std_lead_time'],
-                    color="#2b5c8f", alpha=0.18, label="+/- Std"
+                    x, y - valid['std_lead_time'].values, y + valid['std_lead_time'].values,
+                    color="#2b5c8f", alpha=0.10, label="+/- Std", zorder=1
                 )
-                ax.legend(fontsize=7)
+
+                # Secondary axis: n (hit count) backing each threshold, so low-n
+                # (statistically unreliable) stretches are visible rather than implied.
+                ax2 = ax.twinx()
+                ax2.plot(x, n, color="#c0392b", linestyle="--", linewidth=1.3, alpha=1.0, label="n (hits)", zorder=2)
+                ax2.set_ylim(bottom=0)
+                ax2.grid(False)
+                ax2.tick_params(axis='y', labelsize=7, colors="#c0392b")
+                if j == len(MODELS) - 1:
+                    ax2.set_ylabel("n (hits) [dashed -> right axis]", fontsize=8, color="#c0392b")
+
+                lines1, labels1 = ax.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax.legend(lines1 + lines2, labels1 + labels2, fontsize=6.5, loc="upper right")
             ax.set_title(f"{mfr}\n{model_name.upper()}", fontsize=9)
             if i == len(DATASETS) - 1:
                 ax.set_xlabel("Threshold", fontsize=8)
             if j == 0:
-                ax.set_ylabel("Lead Time (days)", fontsize=8)
+                ax.set_ylabel("Lead Time (days) [solid -> left axis]", fontsize=8)
 
     fig.suptitle(f"Proposed Disk-Level Lead Time vs Threshold (Seed={seed})", fontsize=14, fontweight="bold")
     fig.tight_layout(rect=[0, 0, 1, 0.96])

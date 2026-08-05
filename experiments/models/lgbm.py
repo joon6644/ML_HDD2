@@ -8,7 +8,13 @@ HYPERPARAMS = {
     'num_leaves': 31,
     'verbose': -1,
     'objective': 'binary',
-    'metric': 'binary_logloss',
+    # Early-stopping monitor only (does NOT change the training loss, which stays
+    # binary cross-entropy via 'objective' above). Under severe class imbalance,
+    # binary_logloss plateaus almost immediately because predicting near the prior
+    # already near-minimizes it, triggering early stopping long before the model
+    # has actually learned to separate the minority class. average_precision tracks
+    # minority-class ranking directly, so it doesn't false-plateau the same way.
+    'metric': 'average_precision',
     'min_data_in_leaf': 100,
     'num_boost_round': 300,
     'early_stopping_rounds': 20
