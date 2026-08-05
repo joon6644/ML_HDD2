@@ -1,5 +1,8 @@
 import os
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 import joblib
 import config
 from models.lstm import LSTMClass
@@ -13,8 +16,7 @@ def get_checkpoint_path(model_name: str, imbalance: str, seed: int, lead_time: i
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     clean_ds = os.path.basename(dataset_name.rstrip('/\\'))
     tag_part = f"_{extra_tag}" if extra_tag else ""
-    pv = getattr(config, 'PIPELINE_VERSION', 'v1')
-    filename = f"{model_name.lower()}_{imbalance.lower()}{tag_part}_lead{lead_time}_seed{seed}_{clean_ds}_p{pv}.ckpt"
+    filename = f"{model_name.lower()}_{imbalance.lower()}{tag_part}_lead{lead_time}_seed{seed}_{clean_ds}.ckpt"
     return os.path.join(CHECKPOINT_DIR, filename)
 
 ARCH_KWARG_NAMES = {
@@ -45,7 +47,6 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
         "dataset_name": dataset_name,
         "features": list(features) if features is not None else None,
         "window_size": window_size,
-        "pipeline_ver": getattr(config, 'PIPELINE_VERSION', 'v1'),
         "extra_meta": extra_meta or {}
     }
 
@@ -78,23 +79,12 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
 
 def _validate_checkpoint_compatibility(payload, ckpt_path, features=None, window_size=None):
     """Guard against silently reusing a checkpoint trained under a different feature
-    set, sequence window size, or pipeline version."""
-    # Pipeline version check (catches segment/padding logic changes, etc.)
-    current_pv = getattr(config, 'PIPELINE_VERSION', 'v1')
-    saved_pv   = payload.get('pipeline_ver', 'v1')
-    if saved_pv != current_pv:
-        raise ValueError(
-            f"[Checkpoint Mismatch] '{ckpt_path}' was saved under pipeline version '{saved_pv}', "
-            f"but the current pipeline is '{current_pv}'. "
-            f"Delete or rename the checkpoint to force retraining under the new pipeline."
-        )
-
+    set or sequence window size."""
     saved_features = payload.get("features")
     if features is not None and saved_features is not None and list(features) != saved_features:
         raise ValueError(
             f"[Checkpoint Mismatch] '{ckpt_path}' was trained on a different feature set than the one "
             f"currently requested (saved={len(saved_features)} features, current={len(features)} features). "
-            f"This checkpoint is stale relative to the current config.EXCLUDE_COLS / dataset schema. "
             f"Delete the checkpoint file to retrain, or restore the original feature configuration."
         )
 
@@ -102,9 +92,10 @@ def _validate_checkpoint_compatibility(payload, ckpt_path, features=None, window
     if window_size is not None and saved_window_size is not None and saved_window_size != window_size:
         raise ValueError(
             f"[Checkpoint Mismatch] '{ckpt_path}' was trained with window_size={saved_window_size}, "
-            f"but the current run requests window_size={window_size} (config.WINDOW_SIZE changed?). "
+            f"but the current run requests window_size={window_size}. "
             f"Delete the checkpoint file to retrain with the new window size."
         )
+
 
 
 def load_checkpoint(model_name: str, imbalance: str, seed: int, lead_time: int, dataset_name: str,
