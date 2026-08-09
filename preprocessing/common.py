@@ -29,8 +29,8 @@ def run_base_preprocessing(
       3. (serial_number, date) 중복 행 제거
       4. 누락일 3일 이하는 날짜 행 생성 후 forward fill,
          누락일 4일 이상은 별도 segment로 분리
-      5. forward fill 후 남은 결측치 backward fill
-      6. 두 방향 채움 후에도 SMART 결측치가 남은 행 제거
+      5. 시계열 Forward Fill만 수행 (미래 관측치 참조/Backward Fill 미적용)
+      6. Forward fill 후에도 SMART 결측치가 남은 행 제거 (세그먼트 시작부 미관측 행)
       7. failure=1 이후 다시 failure=0이 관측된 HDD 전체 제거
 
     수치 표준화(StandardScaler)는 데이터 누수를 막기 위해 여기서 수행하지
@@ -277,26 +277,15 @@ def run_base_preprocessing(
     # 실제 fill 계산은 Step 5의 단일 윈도우 SELECT에서 수행한다.
     print(f"  - 날짜 확장 실행 계획 생성 ({time.time() - started:.2f}초)")
 
-    # 5. segment 시작부 등 forward fill로 채우지 못한 값만 미래 관측값으로
-    # backward fill한다.
-    print("\n[Step 5/7] 남은 결측치 backward fill...")
+    # 5. forward fill만 적용 (미래 정보 참조 방지를 위해 backward fill 제거)
+    print("\n[Step 5/7] 시계열 Forward Fill (Backward Fill 제거)...")
     started = time.time()
-    # forward fill과 fallback backward fill은 같은 정렬 키를 공유한다.
-    # 한 SELECT에 두 window expression을 배치하여 DuckDB가 하나의 WINDOW
-    # 연산에서 정렬을 공유하도록 한다.
-    bidirectional_fill_sql = ", ".join(
+    forward_fill_sql = ", ".join(
         f"""
-        COALESCE(
-            LAST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
-                PARTITION BY serial_number, segment
-                ORDER BY record_date
-                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-            ),
-            FIRST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
-                PARTITION BY serial_number, segment
-                ORDER BY record_date
-                ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
-            )
+        LAST_VALUE({_quoted(col)} IGNORE NULLS) OVER (
+            PARTITION BY serial_number, segment
+            ORDER BY record_date
+            ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
         ) AS {_quoted(col)}
         """
         for col in columns_to_fill
@@ -308,14 +297,14 @@ def run_base_preprocessing(
             serial_number,
             record_date,
             segment,
-            {bidirectional_fill_sql}
+            {forward_fill_sql}
         FROM expanded_and_joined
         """
     )
-    print(f"  - 양방향 fill 단일 실행 계획 생성 ({time.time() - started:.2f}초)")
+    print(f"  - Forward fill 실행 계획 생성 ({time.time() - started:.2f}초)")
 
     # 6. 라벨을 임의의 0으로 바꾸지 않는다. model/failure/SMART 중 하나라도
-    # 두 방향 채움 후 NULL이면 해당 행을 제거한다.
+    # Forward fill 후 NULL이면 (세그먼트 시작부 미관측 행 등) 해당 행을 제거한다.
     print("\n[Step 6/7] 전처리 후에도 결측치가 남은 행 제거...")
     started = time.time()
     required_non_null_sql = " AND ".join(

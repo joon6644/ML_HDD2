@@ -5,9 +5,12 @@ except ImportError:
     torch = None
 import joblib
 import config
-from models.lstm import LSTMClass
-from models.gru import GRUClass
-from models.mlp import MLPClass
+try:
+    from models.lstm import LSTMClass
+    from models.gru import GRUClass
+    from models.mlp import MLPClass
+except (ImportError, ModuleNotFoundError):
+    LSTMClass = GRUClass = MLPClass = None
 from imbalance import EasyEnsembleModelWrapper
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "checkpoints")

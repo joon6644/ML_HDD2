@@ -217,7 +217,7 @@ class RollingEvaluator:
             })
         return raw_preds
 
-    def find_best_threshold_proposed_level(self, raw_preds, max_far=None):
+    def find_best_threshold_proposed_level(self, raw_preds, max_far=None, lead_time=30):
         """
         Finds the threshold that maximizes Disk-level Recall on raw predictions
         subject to Disk-level FAR <= max_far (default 1%) on validation predictions.
@@ -238,7 +238,7 @@ class RollingEvaluator:
         fallback_max_recall = -1.0
 
         for thresh in thresholds:
-            hits, false_alarms = 0, 0
+            hits, fp_cens = 0, 0
             for disk in raw_preds:
                 has_failed = disk['has_failed']
                 preds = disk['preds']
@@ -249,13 +249,13 @@ class RollingEvaluator:
                     first_alarm_idx = np.where(alarm_mask)[0][0]
                     first_alarm_date = pd.to_datetime(disk['dates'][first_alarm_idx])
                     days_to_failure = (disk['failure_date'] - first_alarm_date).days
-                    if days_to_failure >= 0:
+                    if 0 <= days_to_failure <= lead_time:
                         hits += 1
                 else:
-                    false_alarms += 1
+                    fp_cens += 1
                     
             recall = hits / failed_disks if failed_disks > 0 else 0.0
-            far = false_alarms / censored_disks if censored_disks > 0 else 0.0
+            far = fp_cens / censored_disks if censored_disks > 0 else 0.0
 
             if (far < fallback_min_far) or (far == fallback_min_far and recall > fallback_max_recall):
                 fallback_min_far = far
@@ -274,10 +274,10 @@ class RollingEvaluator:
 
         return float(best_threshold), float(best_recall)
 
-    def evaluate_proposed_level(self, raw_preds, threshold):
+    def evaluate_proposed_level(self, raw_preds, threshold, lead_time=30):
         """
-        Evaluates Proposed Disk-Level method using raw_preds at a fixed threshold.
-        Lead time is sampled from the model's FIRST POSITIVE PREDICTION across ALL failed disks.
+        Evaluates Proposed Disk-Level method using raw_preds at a fixed threshold
+        strictly following HDD operational metrics definition.
         """
         records = []
         for disk in raw_preds:
@@ -296,7 +296,12 @@ class RollingEvaluator:
             alarm_score = None
             days_to_failure = None
             
-            is_hit, is_miss, is_false_alarm, is_correct_rejection = 0, 0, 0, 0
+            is_hit = 0         # TP: 0 <= days_to_failure <= lead_time
+            is_miss = 0        # FN: No alarm on failed HDD
+            is_fp_early = 0    # FP_early: Alarm > lead_time days before failure
+            is_fp_cens = 0     # FP_cens: Alarm on censored HDD
+            is_false_alarm = 0 # FP = FP_early + FP_cens
+            is_correct_rejection = 0 # TN: No alarm on censored HDD
             
             if alarm_triggered:
                 first_alarm_idx = alarm_indices[0]
@@ -304,11 +309,13 @@ class RollingEvaluator:
                 alarm_score = float(preds[first_alarm_idx])
                 if has_failed:
                     days_to_failure = (failure_date - first_alarm_date).days
-                    if days_to_failure >= 0:
+                    if 0 <= days_to_failure <= lead_time:
                         is_hit = 1
                     else:
-                        is_miss = 1
+                        is_fp_early = 1
+                        is_false_alarm = 1
                 else:
+                    is_fp_cens = 1
                     is_false_alarm = 1
             else:
                 if has_failed:
@@ -324,6 +331,8 @@ class RollingEvaluator:
                 'actual_failure_date': failure_date,
                 'days_to_failure_at_alarm': days_to_failure,
                 'is_hit': is_hit,
+                'is_fp_early': is_fp_early,
+                'is_fp_cens': is_fp_cens,
                 'is_false_alarm': is_false_alarm,
                 'is_miss': is_miss,
                 'is_correct_rejection': is_correct_rejection,
@@ -337,19 +346,21 @@ class RollingEvaluator:
         failed_disks = int(report_df['has_failed'].sum())
         censored_disks = int(total_disks - failed_disks)
         
-        hits = int(report_df['is_hit'].sum())
-        false_alarms = int(report_df['is_false_alarm'].sum())
-        misses = int(report_df['is_miss'].sum())
-        correct_rejections = int(report_df['is_correct_rejection'].sum())
+        hits = int(report_df['is_hit'].sum())                  # TP
+        fp_early = int(report_df['is_fp_early'].sum())         # FP_early
+        fp_cens = int(report_df['is_fp_cens'].sum())           # FP_cens
+        false_alarms = int(report_df['is_false_alarm'].sum())  # FP = FP_early + FP_cens
+        misses = int(report_df['is_miss'].sum())                # FN
+        correct_rejections = int(report_df['is_correct_rejection'].sum()) # TN
         
-        recall = float(hits / failed_disks) if failed_disks > 0 else 0.0
-        far = float(false_alarms / censored_disks) if censored_disks > 0 else 0.0
         precision = float(hits / (hits + false_alarms)) if (hits + false_alarms) > 0 else 0.0
+        recall = float(hits / (hits + misses + fp_early)) if (hits + misses + fp_early) > 0 else (float(hits / failed_disks) if failed_disks > 0 else 0.0)
+        far = float(fp_cens / (fp_cens + correct_rejections)) if (fp_cens + correct_rejections) > 0 else (float(fp_cens / censored_disks) if censored_disks > 0 else 0.0)
         f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
 
-        # Lead time calculation sampled over ALL failed disks with positive prediction
-        hit_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
-        lead_times = hit_failed_rows['days_to_failure_at_alarm'].dropna().values
+        # Lead time calculation sampled over ALL failed disks where a first alarm exists (TP + FP_early)
+        all_alarm_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
+        lead_times = all_alarm_failed_rows['days_to_failure_at_alarm'].dropna().values
         
         mean_lt = float(np.mean(lead_times)) if len(lead_times) > 0 else 0.0
         median_lt = float(np.median(lead_times)) if len(lead_times) > 0 else 0.0
@@ -361,6 +372,8 @@ class RollingEvaluator:
         disk_metrics = {
             'tp': hits,
             'fp': false_alarms,
+            'fp_early': fp_early,
+            'fp_cens': fp_cens,
             'fn': misses,
             'tn': correct_rejections,
             'precision': precision,

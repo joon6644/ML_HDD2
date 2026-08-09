@@ -136,7 +136,7 @@ def main():
     parser.add_argument('--step', type=float, default=0.01, help='Threshold step size (only used if no cached sweep CSV exists)')
     args = parser.parse_args()
 
-    results_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+    results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     os.makedirs(results_dir, exist_ok=True)
 
     max_far = getattr(config, 'MAX_FAR', 0.01)

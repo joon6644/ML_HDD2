@@ -155,7 +155,7 @@ def main():
     parser.add_argument('--step', type=float, default=0.01, help='Threshold step size')
     args = parser.parse_args()
 
-    results_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+    results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     os.makedirs(results_dir, exist_ok=True)
 
     thresholds = np.round(np.arange(0.01, 1.00, args.step), 4)

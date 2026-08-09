@@ -9,8 +9,13 @@ Shared utilities for all model training modules.
 """
 import math
 import numpy as np
-import torch
-import torch.nn as nn
+try:
+    import torch
+    import torch.nn as nn
+except ImportError:
+    torch = None
+    class nn:
+        Module = object
 
 
 # Training hyperparameters shared across all three PyTorch models (gru/lstm/mlp).

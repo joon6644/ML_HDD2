@@ -165,7 +165,8 @@ class RollingEvaluator:
 
     def build_report_from_raw_predictions(self, raw_preds, threshold, lead_time=30):
         """
-        Build detailed alarm report from raw predictions using a specific threshold.
+        Build detailed alarm report from raw predictions using a specific threshold,
+        strictly following the HDD operational metrics specification.
         """
         records = []
         for disk in raw_preds:
@@ -175,7 +176,7 @@ class RollingEvaluator:
             dates = disk['dates']
             preds = disk['preds']
             
-            max_score = float(preds.max())
+            max_score = float(preds.max()) if len(preds) > 0 else 0.0
             alarm_mask = (preds >= threshold)
             alarm_indices = np.where(alarm_mask)[0]
             
@@ -184,10 +185,12 @@ class RollingEvaluator:
             alarm_score = None
             days_to_failure = None
             
-            is_hit = 0
-            is_miss = 0
-            is_false_alarm = 0
-            is_correct_rejection = 0
+            is_hit = 0         # TP: 0 <= days_to_failure <= lead_time
+            is_miss = 0        # FN: No alarm on failed HDD
+            is_fp_early = 0    # FP_early: Alarm > lead_time days before failure
+            is_fp_cens = 0     # FP_cens: Alarm on censored HDD
+            is_false_alarm = 0 # FP = FP_early + FP_cens
+            is_correct_rejection = 0 # TN: No alarm on censored HDD
             
             if alarm_triggered:
                 first_alarm_idx = alarm_indices[0]
@@ -196,18 +199,19 @@ class RollingEvaluator:
                 
                 if has_failed:
                     days_to_failure = (failure_date - first_alarm_date).days
-                    # Hit: Alarm within the specified lead time before failure
-                    if days_to_failure >= 0:
+                    if 0 <= days_to_failure <= lead_time:
                         is_hit = 1
                     else:
-                        is_miss = 1  # Alarm triggered, but too early or after failure
+                        is_fp_early = 1
+                        is_false_alarm = 1
                 else:
-                    is_false_alarm = 1  # Healthy disk triggered alarm
+                    is_fp_cens = 1
+                    is_false_alarm = 1
             else:
                 if has_failed:
-                    is_miss = 1  # Failed disk, but no alarm was triggered at all
+                    is_miss = 1
                 else:
-                    is_correct_rejection = 1  # Healthy disk, no alarm triggered
+                    is_correct_rejection = 1
                     
             records.append({
                 'serial_number': serial,
@@ -217,6 +221,8 @@ class RollingEvaluator:
                 'actual_failure_date': failure_date,
                 'days_to_failure_at_alarm': days_to_failure,
                 'is_hit': is_hit,
+                'is_fp_early': is_fp_early,
+                'is_fp_cens': is_fp_cens,
                 'is_false_alarm': is_false_alarm,
                 'is_miss': is_miss,
                 'is_correct_rejection': is_correct_rejection,
@@ -228,7 +234,7 @@ class RollingEvaluator:
 
     def find_best_threshold(self, raw_preds, max_far=0.01, lead_time=30):
         """
-        Find the threshold that maximizes Recall on raw predictions subject to FAR <= max_far (1%).
+        Find the threshold that maximizes HDD-level Recall on raw predictions subject to FAR <= max_far (1%).
         If no threshold satisfies FAR <= max_far, returns the threshold that minimizes FAR.
         """
         thresholds = np.linspace(0.01, 0.99, 99)
@@ -245,7 +251,7 @@ class RollingEvaluator:
 
         for thresh in thresholds:
             hits = 0
-            false_alarms = 0
+            fp_cens = 0
             
             for disk in raw_preds:
                 has_failed = disk['has_failed']
@@ -259,13 +265,13 @@ class RollingEvaluator:
                     first_alarm_idx = np.where(alarm_mask)[0][0]
                     first_alarm_date = pd.to_datetime(disk['dates'][first_alarm_idx])
                     days_to_failure = (disk['failure_date'] - first_alarm_date).days
-                    if days_to_failure >= 0:
+                    if 0 <= days_to_failure <= lead_time:
                         hits += 1
                 else:
-                    false_alarms += 1
+                    fp_cens += 1
                     
             recall = hits / failed_disks if failed_disks > 0 else 0.0
-            far = false_alarms / censored_disks if censored_disks > 0 else 0.0
+            far = fp_cens / censored_disks if censored_disks > 0 else 0.0
             
             # Track fallback in case no threshold meets max_far (minimize FAR, then maximize Recall)
             if (far < fallback_min_far) or (far == fallback_min_far and recall > fallback_max_recall):
@@ -334,16 +340,18 @@ def analyze_and_save_report(report_df, output_csv_path=None, threshold=None):
     censored_disks = total_disks - failed_disks
     
     hits = report_df['is_hit'].sum()
+    fp_early = report_df['is_fp_early'].sum() if 'is_fp_early' in report_df.columns else 0
+    fp_cens = report_df['is_fp_cens'].sum() if 'is_fp_cens' in report_df.columns else 0
     false_alarms = report_df['is_false_alarm'].sum()
     misses = report_df['is_miss'].sum()
     correct_rejections = report_df['is_correct_rejection'].sum()
     
-    recall = hits / failed_disks if failed_disks > 0 else 0.0
-    far = false_alarms / censored_disks if censored_disks > 0 else 0.0
     precision = hits / (hits + false_alarms) if (hits + false_alarms) > 0 else 0.0
+    recall = hits / (hits + misses + fp_early) if (hits + misses + fp_early) > 0 else (hits / failed_disks if failed_disks > 0 else 0.0)
+    far = fp_cens / (fp_cens + correct_rejections) if (fp_cens + correct_rejections) > 0 else (fp_cens / censored_disks if censored_disks > 0 else 0.0)
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
 
-    # Lead time statistics across all failed HDDs that triggered an alarm
+    # Lead time statistics across all failed HDDs that triggered a first alarm (TP + FP_early)
     all_alarm_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
     lead_times = all_alarm_failed_rows['days_to_failure_at_alarm'].dropna().values
     
@@ -359,7 +367,8 @@ def analyze_and_save_report(report_df, output_csv_path=None, threshold=None):
         lt_distribution = {
             '0-5 days': int(np.sum(lead_times <= 5)),
             '6-15 days': int(np.sum((lead_times > 5) & (lead_times <= 15))),
-            '16-30 days': int(np.sum((lead_times > 15) & (lead_times <= 30)))
+            '16-30 days': int(np.sum((lead_times > 15) & (lead_times <= 30))),
+            '>30 days (Early)': int(np.sum(lead_times > 30))
         }
 
     print("\n" + "="*50)
@@ -371,17 +380,19 @@ def analyze_and_save_report(report_df, output_csv_path=None, threshold=None):
     print(f"  - Failed (Target)   : {failed_disks}")
     print(f"  - Censored (Healthy): {censored_disks}")
     print("-"*50)
-    print(f"Hits (True Alerts)    : {hits} (Alarms raised within lead time)")
-    print(f"Misses                : {misses} (Failed with no alarm)")
-    print(f"False Alarms          : {false_alarms} (Healthy with alarm, or too early)")
-    print(f"Correct Rejections    : {correct_rejections} (Healthy with no alarm)")
+    print(f"Hits (TP)             : {hits} (Alarms raised within 30d of failure)")
+    print(f"Misses (FN)           : {misses} (Failed with no alarm)")
+    print(f"Early Alarms (FP_early): {fp_early} (Failed with alarm > 30d before failure)")
+    print(f"Censored Alarms(FP_cens): {fp_cens} (Healthy with alarm)")
+    print(f"Total False Alarms(FP): {false_alarms} (FP_early + FP_cens)")
+    print(f"Correct Rejections(TN): {correct_rejections} (Healthy with no alarm)")
     print("-"*50)
-    print(f"Recall (Hit Rate)     : {recall:.4%}")
-    print(f"FAR (False Alarm Rate): {far:.4%}")
-    print(f"Precision             : {precision:.4%}")
-    print(f"F1-Score              : {f1:.4%}")
+    print(f"HDD Precision         : {precision:.4%}")
+    print(f"HDD Recall            : {recall:.4%}")
+    print(f"HDD FAR               : {far:.4%}")
+    print(f"HDD F1-Score          : {f1:.4%}")
     print("-"*50)
-    print("Warning Lead Time Statistics (for Hits):")
+    print("Warning Lead Time Statistics (for all failed HDDs with first alarm):")
     if len(lead_times) > 0:
         print(f"  - Mean Lead Time    : {mean_lt:.2f} days")
         print(f"  - Median Lead Time  : {median_lt:.2f} days")
@@ -390,21 +401,27 @@ def analyze_and_save_report(report_df, output_csv_path=None, threshold=None):
         print("  - Distribution Bins :")
         for bucket, count in lt_distribution.items():
             pct = count / len(lead_times)
-            print(f"    * {bucket:10s} : {count:3d} ({pct:.1%})")
+            print(f"    * {bucket:16s} : {count:3d} ({pct:.1%})")
     else:
-        print("  - No hits to analyze lead times.")
+        print("  - No alarms to analyze lead times.")
     print("="*50 + "\n")
 
     analysis_metrics = {
-        'recall': recall,
-        'far': far,
-        'precision': precision,
-        'f1': f1,
-        'mean_lead_time': mean_lt,
-        'median_lead_time': median_lt,
-        'std_lead_time': std_lt,
-        'min_lead_time': min_lt,
-        'max_lead_time': max_lt,
+        'tp': int(hits),
+        'fn': int(misses),
+        'fp_early': int(fp_early),
+        'fp_cens': int(fp_cens),
+        'fp': int(false_alarms),
+        'tn': int(correct_rejections),
+        'recall': float(recall),
+        'far': float(far),
+        'precision': float(precision),
+        'f1': float(f1),
+        'mean_lead_time': float(mean_lt),
+        'median_lead_time': float(median_lt),
+        'std_lead_time': float(std_lt),
+        'min_lead_time': float(min_lt),
+        'max_lead_time': float(max_lt),
         'lead_time_distribution': lt_distribution
     }
     return analysis_metrics

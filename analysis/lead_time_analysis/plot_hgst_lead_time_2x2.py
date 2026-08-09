@@ -5,7 +5,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Publication Quality Styling Settings
+plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans', 'Calibri', 'sans-serif']
+plt.rcParams['axes.edgecolor'] = '#111111'
+plt.rcParams['axes.linewidth'] = 1.1
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
 ANALYSIS_DIR = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -21,52 +26,70 @@ MODELS = [
 ]
 
 STYLE_CONFIG = {
-    "LGBM": {"fill": "#2b5c8f", "edge": "#000000", "median": "#d9534f"},
-    "XGB":  {"fill": "#d95f02", "edge": "#000000", "median": "#d9534f"},
-    "LSTM": {"fill": "#7570b3", "edge": "#000000", "median": "#d9534f"},
-    "GRU":  {"fill": "#1b9e77", "edge": "#000000", "median": "#d9534f"}
+    "LGBM": {
+        "fill": "#2b5c8f",       # Modern Deep Blue
+        "edge": "#000000",       # Black Border
+        "median_line": "#d9534f" # Crimson accent
+    },
+    "XGB": {
+        "fill": "#d95f02",       # Tone-down Orange
+        "edge": "#000000",
+        "median_line": "#d9534f"
+    },
+    "LSTM": {
+        "fill": "#7570b3",       # Soft Purple/Slate
+        "edge": "#000000",
+        "median_line": "#d9534f"
+    },
+    "GRU": {
+        "fill": "#1b9e77",       # Deep Teal
+        "edge": "#000000",
+        "median_line": "#d9534f"
+    }
 }
 
 
-def load_lead_time_records(hdd_name: str, model_code: str) -> np.ndarray:
-    filename = f"lead_time_{hdd_name}_{model_code}_all_alarms.csv"
-    results_path = os.path.join(RESULTS_DIR, filename)
-    analysis_path = os.path.join(ANALYSIS_DIR, filename)
+def load_lead_time_data(model_code: str) -> np.ndarray:
+    """Load first alarm lead time dataset."""
+    filename = f"lead_time_{HDD_NAME}_{model_code}_all_alarms.csv"
+    path = os.path.join(RESULTS_DIR, filename)
+    if not os.path.exists(path):
+        path = os.path.join(ANALYSIS_DIR, filename)
     
-    if os.path.exists(results_path):
-        df = pd.read_csv(results_path)
-        return df['lead_time_days'].values
-    elif os.path.exists(analysis_path):
-        df = pd.read_csv(analysis_path)
+    if os.path.exists(path):
+        df = pd.read_csv(path)
         return df['lead_time_days'].values
     else:
-        alt_path = os.path.join(ANALYSIS_DIR, f"seed42_alarm_report_{hdd_name}_{model_code}.csv")
-        if os.path.exists(alt_path):
-            df = pd.read_csv(alt_path)
+        path_alt = os.path.join(ANALYSIS_DIR, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
+        if os.path.exists(path_alt):
+            df = pd.read_csv(path_alt)
             hits = df[(df['has_failed'] == 1) & (df['is_hit'] == 1)]
             return hits['days_to_failure_at_alarm'].dropna().values
         else:
-            raise FileNotFoundError(f"Lead time record file missing for {model_code}")
+            raise FileNotFoundError(f"Lead time dataset missing for {model_code}")
 
 
 def main():
-    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans', 'Calibri', 'sans-serif']
-    plt.rcParams['axes.edgecolor'] = '#111111'
-    plt.rcParams['axes.linewidth'] = 1.1
-
     sns.set_theme(style="ticks", palette="muted")
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
-    fig.suptitle("First-Alarm Lead Time Distribution — HGST (20HUH721212ALN604)", fontsize=16, fontweight="bold", y=0.98, color="#111111")
+    
+    fig.suptitle(
+        "First-Alarm Lead Time Distribution — HGST (20HUH721212ALN604)",
+        fontsize=16, fontweight="bold", y=0.98, color="#111111"
+    )
 
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    tags = ["(a)", "(b)", "(c)", "(d)"]
+    labels = ["(a)", "(b)", "(c)", "(d)"]
+    
+    # 35 bins across 0 to 180 days
     bins = np.linspace(0, 180, 36)
 
+    # Pre-calculate data to ensure unified Y-axis limit
     model_data = {}
     max_density = 0.0
 
     for m_code, _ in MODELS:
-        lead_times_full = load_lead_time_records(HDD_NAME, m_code)
+        lead_times_full = load_lead_time_data(m_code)
         lead_times_disp = lead_times_full[lead_times_full <= 180]
         true_median = float(np.median(lead_times_full))
         
@@ -74,7 +97,11 @@ def main():
         if len(counts) > 0 and counts.max() > max_density:
             max_density = counts.max()
             
-        model_data[m_code] = {"full": lead_times_full, "disp": lead_times_disp, "median": true_median}
+        model_data[m_code] = {
+            "full": lead_times_full,
+            "disp": lead_times_disp,
+            "median": true_median
+        }
 
     y_limit = max(0.045, np.ceil(max_density * 100) / 100 + 0.005)
 
@@ -88,6 +115,7 @@ def main():
         lead_times_display = data["disp"]
         true_median_lt = data["median"]
 
+        # Solid Fill Histogram with Black Borders
         ax.hist(
             lead_times_display,
             bins=bins,
@@ -99,34 +127,46 @@ def main():
             label="Density Hist"
         )
 
+        # Vertical Line for Median
         ax.axvline(
             true_median_lt,
-            color=style["median"],
+            color=style["median_line"],
             linestyle="--",
             linewidth=2.4,
             zorder=5,
             label=f"Median: {true_median_lt:.1f} days"
         )
 
-        ax.set_title(f"{tags[idx]} {m_title}  (n = {len(lead_times_full)})", fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111")
+        # Subplot Formatting
+        ax.set_title(
+            f"{labels[idx]} {m_title}  (n = {len(lead_times_full)})",
+            fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111"
+        )
+        
+        ax.set_xlabel("Lead Time (Days)", fontsize=11, fontweight="bold", labelpad=6)
         if c == 0:
             ax.set_ylabel("Probability Density", fontsize=11, fontweight="bold", labelpad=6)
         else:
             ax.set_ylabel("")
-
+        
         ax.set_xlim(0, 180)
         ax.set_xticks(np.arange(0, 181, 30))
         ax.set_ylim(0, y_limit)
-
+        
+        # Apply label_outer for clean y-axis deduplication
         ax.label_outer()
+        # Ensure x-label is displayed on all subplots for explicit clarity
         ax.set_xlabel("Lead Time (Days)", fontsize=11, fontweight="bold", labelpad=6)
-
+        
+        # Subtle horizontal grid line (alpha=0.20)
         ax.grid(True, axis="y", linestyle=":", alpha=0.20, color="#666666")
         ax.grid(False, axis="x")
         sns.despine(ax=ax, top=True, right=True)
-
+        
+        # Legend with Median info
         handles, labels_leg = ax.get_legend_handles_labels()
         sel = [i for i, l in enumerate(labels_leg) if "Median" in l]
+        
         ax.legend(
             [handles[i] for i in sel],
             [labels_leg[i] for i in sel],
@@ -140,15 +180,16 @@ def main():
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-    out_img1 = os.path.join(RESULTS_DIR, "HGST_20HUH721212ALN604_4models_2x2_lead_time.png")
+    out_path_results = os.path.join(RESULTS_DIR, "HGST_20HUH721212ALN604_4models_2x2_lead_time_density.png")
     
-    plt.savefig(out_img1, dpi=300, bbox_inches="tight")
+    plt.savefig(out_path_results, dpi=300, bbox_inches="tight")
     plt.close()
 
-    print("\n" + "=" * 80)
-    print(" [SUCCESS] Updated 2x2 Lead Time Plot Saved with Deduplicated Y-Axis!")
-    print(f" Saved to:\n  -> {out_img1}")
-    print("=" * 80 + "\n")
+    print("=" * 80)
+    print(" [SUCCESS] Clean Y-axis Label Outer 2x2 Density Plot Generated!")
+    print("  - Applied label_outer(): Removed redundant Y-axis labels & tick labels on (b) & (d)")
+    print(f" Saved to: {out_path_results}")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

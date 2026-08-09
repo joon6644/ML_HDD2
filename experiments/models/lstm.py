@@ -1,9 +1,14 @@
 import copy
 import math
-import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
+try:
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except ImportError:
+    torch = None
+    class nn:
+        Module = object
+    optim = None
 from .common import BinaryFocalLoss, set_torch_seed, COMMON_HYPERPARAMS, compute_sqrt_scale_pos_weight
 
 # Unified Deep Learning Hyperparameters (shared keys sourced from common.COMMON_HYPERPARAMS)

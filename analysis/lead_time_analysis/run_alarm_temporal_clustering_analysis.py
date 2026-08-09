@@ -35,6 +35,14 @@ DEFAULT_THRESHOLDS = {
     ("HGST_20HUH721212ALN604", "GRU"): 0.16,
 }
 
+# Trendy Academic Palette (Option B)
+STYLE_CONFIG = {
+    "lgbm": {"fill": "#2b5c8f", "edge": "#000000", "title": "LightGBM"},
+    "xgb":  {"fill": "#d95f02", "edge": "#000000", "title": "XGBoost"},
+    "lstm": {"fill": "#7570b3", "edge": "#000000", "title": "LSTM"},
+    "gru":  {"fill": "#1b9e77", "edge": "#000000", "title": "GRU"}
+}
+
 
 def load_threshold_map() -> dict:
     threshold_map = DEFAULT_THRESHOLDS.copy()
@@ -119,9 +127,22 @@ def extract_all_alarm_events(hdd_name: str, model_name: str, threshold: float):
     return df_events, total_failed
 
 
+def model_data_key(m: str) -> str:
+    m_u = m.upper()
+    return "LGBM" if m_u == "LIGHTGBM" else ("XGB" if m_u == "XGBOOST" else m_u)
+
+
 def main():
     hdd_name = "HGST_20HUH721212ALN604"
-    threshold_map = load_threshold_map()
+    results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+    analysis_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+    os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(analysis_dir, exist_ok=True)
+
+    csv_path = os.path.join(results_dir, f"{hdd_name}_all_alarm_events_temporal_clustering.csv")
+    if not os.path.exists(csv_path):
+        csv_path = os.path.join(analysis_dir, f"{hdd_name}_all_alarm_events_temporal_clustering.csv")
+
     models = ["lgbm", "xgb", "lstm", "gru"]
     model_titles = {
         "lgbm": "LightGBM",
@@ -130,58 +151,43 @@ def main():
         "gru": "GRU"
     }
 
-    results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
-    os.makedirs(results_dir, exist_ok=True)
-
-    print("=" * 80)
-    print(f"  HGST_20HUH721212ALN604 - NORMALIZED ALARM FREQUENCY ANALYSIS (4 MODELS 2x2)  ")
-    print("=" * 80)
-
-    model_events = {}
-    all_events_list = []
-
-    for m in models:
-        model_upper = model_titles[m].upper()
-        lookup_key = "LGBM" if model_upper == "LIGHTGBM" else ("XGB" if model_upper == "XGBOOST" else model_upper)
-        thresh = threshold_map.get((hdd_name, lookup_key), DEFAULT_THRESHOLDS.get((hdd_name, lookup_key), 0.5))
-
-        df_ev, total_failed = extract_all_alarm_events(hdd_name, m, thresh)
-        all_events_list.append(df_ev)
-
-        model_events[m] = {
-            'title': model_titles[m],
-            'lookup_key': lookup_key,
-            'threshold': thresh,
-            'df_events': df_ev,
-            'total_failed': total_failed
-        }
-
-    # Combine all events
-    if len(all_events_list) > 0:
-        full_df = pd.concat(all_events_list, ignore_index=True)
-        full_csv = os.path.join(results_dir, f"{hdd_name}_all_alarm_events_temporal_clustering.csv")
-        full_df.to_csv(full_csv, index=False, encoding='utf-8-sig')
+    if os.path.exists(csv_path):
+        print(f"[Data Loader] Loading pre-extracted temporal clustering events from {csv_path}")
+        full_df = pd.read_csv(csv_path)
     else:
-        full_df = pd.DataFrame()
+        threshold_map = load_threshold_map()
+        all_events_list = []
+        for m in models:
+            model_upper = model_titles[m].upper()
+            lookup_key = "LGBM" if model_upper == "LIGHTGBM" else ("XGB" if model_upper == "XGBOOST" else model_upper)
+            thresh = threshold_map.get((hdd_name, lookup_key), DEFAULT_THRESHOLDS.get((hdd_name, lookup_key), 0.5))
 
-    # Generate 2x2 Plot with Seaborn histplot using stat='percent'
-    sns.set_theme(style="whitegrid")
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle("Normalized Temporal Alarm Distribution Before Failure - HGST (20HUH721212ALN604)", fontsize=16, fontweight="bold", y=0.98)
+            df_ev, _ = extract_all_alarm_events(hdd_name, m, thresh)
+            all_events_list.append(df_ev)
 
-    color_dict = {
-        "lgbm": "#1f77b4",
-        "xgb": "#ff7f0e",
-        "lstm": "#2ca02c",
-        "gru": "#d62728"
-    }
+        full_df = pd.concat(all_events_list, ignore_index=True)
+        out_csv = os.path.join(results_dir, f"{hdd_name}_all_alarm_events_temporal_clustering.csv")
+        full_df.to_csv(out_csv, index=False, encoding='utf-8-sig')
+
+    # Publication Quality Styling Settings
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans', 'Calibri', 'sans-serif']
+    plt.rcParams['axes.edgecolor'] = '#111111'
+    plt.rcParams['axes.linewidth'] = 1.1
+
+    sns.set_theme(style="ticks", palette="muted")
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
+    fig.suptitle(
+        "Normalized Temporal Alarm Distribution Before Failure — HGST (20HUH721212ALN604)",
+        fontsize=16, fontweight="bold", y=0.98, color="#111111"
+    )
 
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-    bins = np.arange(-0.5, 180.5, 5.0) # 5-day step binning for clean % representation
+    labels = ["(a)", "(b)", "(c)", "(d)"]
+    bins = np.linspace(0, 180, 36) # 35 bins across 0 to 180 days
 
-    # Find max percentage to standardize y-axis limits across all 4 subplots
-    max_pct = 0.0
+    # Pre-calculate data to standardize y-axis limits across all 4 subplots
     plot_data_dict = {}
+    max_pct = 0.0
 
     for m in models:
         df_m = full_df[(full_df['model'] == model_data_key(m)) & (full_df['days_to_failure'] <= 180)]
@@ -199,51 +205,63 @@ def main():
     for idx, m in enumerate(models):
         r, c = positions[idx]
         ax = axes[r, c]
-
-        info = model_events[m]
+        style = STYLE_CONFIG[m]
         df_m = plot_data_dict[m]
-        m_title = info['title']
+        m_title = style['title']
+        n_events = len(df_m)
 
-        if len(df_m) > 0:
+        if n_events > 0:
             sns.histplot(
                 data=df_m,
                 x='days_to_failure',
                 bins=bins,
                 stat='percent',
-                kde=True,
-                color=color_dict[m],
-                edgecolor="black",
-                alpha=0.70,
-                linewidth=1.0,
+                kde=False,              # 1. KDE line removed
+                color=style["fill"],     # 2. Trendy Academic Solid Fill
+                edgecolor=style["edge"], # Crisp Black Border
+                alpha=0.72,
+                linewidth=0.9,
                 ax=ax
             )
 
-        # Vertical reference lines
-        ax.axvline(10, color="red", linestyle="--", linewidth=2.0, label="Imminent Zone (0-10d)")
-        ax.axvline(30, color="goldenrod", linestyle="-.", linewidth=2.0, label="Operational Window (30d)")
+        # 3. Vertical lines and legends completely removed
+        ax.set_title(
+            f"{labels[idx]} {m_title}  (n = {n_events})",
+            fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111"
+        )
+        
+        ax.set_xlabel("Days Remaining to Failure (Days)", fontsize=11, fontweight="bold", labelpad=6)
+        if c == 0:
+            ax.set_ylabel("Normalized Alarm Frequency (%)", fontsize=11, fontweight="bold", labelpad=6)
+        else:
+            ax.set_ylabel("")
 
-        ax.set_title(f"({chr(65+idx)}) {m_title}", fontsize=13, fontweight="bold", pad=10)
-        ax.set_xlabel("Days Remaining to Failure (Days to Failure)", fontsize=11)
-        ax.set_ylabel("Normalized Alarm Frequency (%)", fontsize=11)
-        ax.set_xlim(-2, 182)
+        ax.set_xlim(0, 180)
+        ax.set_xticks(np.arange(0, 181, 30))
         ax.set_ylim(0, ylim_top)
-        ax.set_xticks(range(0, 181, 15))
-        ax.legend(fontsize=10.5, loc="upper right")
+
+        # Deduplicate y-axis labels and tick numbers
+        ax.label_outer()
+        ax.set_xlabel("Days Remaining to Failure (Days)", fontsize=11, fontweight="bold", labelpad=6)
+
+        ax.grid(True, axis="y", linestyle=":", alpha=0.20, color="#666666")
+        ax.grid(False, axis="x")
+        sns.despine(ax=ax, top=True, right=True)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
 
     output_img_path = os.path.join(results_dir, "HGST_20HUH721212ALN604_4models_2x2_alarm_temporal_clustering.png")
-    plt.savefig(output_img_path, dpi=300)
+    
+    plt.savefig(output_img_path, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("\n" + "=" * 80)
-    print(f" [SUCCESS] Normalized Temporal Alarm Clustering 2x2 Grid Image saved to:\n  {output_img_path}")
+    print(" [SUCCESS] Temporal Alarm Clustering 2x2 Grid Image Updated!")
+    print("  - Removed KDE curve line")
+    print("  - Removed vertical reference lines and legends completely")
+    print("  - Matched Trendy Academic styling (Option B colors, black borders, 35 bins, label_outer)")
+    print(f" Saved to:\n  -> {output_img_path}")
     print("=" * 80 + "\n")
-
-
-def model_data_key(m: str) -> str:
-    m_u = m.upper()
-    return "LGBM" if m_u == "LIGHTGBM" else ("XGB" if m_u == "XGBOOST" else m_u)
 
 
 if __name__ == "__main__":

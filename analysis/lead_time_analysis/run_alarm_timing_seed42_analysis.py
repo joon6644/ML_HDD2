@@ -27,20 +27,25 @@ from checkpoint_utils import load_checkpoint
 from evaluator import RollingEvaluator
 
 SEED = 42
-DATASETS = ['ST12000NM0007', 'HGST_20HUH721212ALN604', 'TOSHIBA_20MG07ACA14TA']
+HDD_NAME = "HGST_20HUH721212ALN604"
 MODELS = ['lgbm', 'xgb', 'lstm', 'gru']
 
-MANUFACTURER_MAP = {
-    "ST12000NM0007": "Seagate (ST12000NM0007)",
-    "HGST_20HUH721212ALN604": "HGST (20HUH721212ALN604)",
-    "TOSHIBA_20MG07ACA14TA": "Toshiba (20MG07ACA14TA)"
+MODEL_TITLES = {
+    'lgbm': 'LightGBM',
+    'xgb': 'XGBoost',
+    'lstm': 'LSTM',
+    'gru': 'GRU'
+}
+
+STYLE_CONFIG = {
+    "lgbm": {"fill": "#2b5c8f", "edge": "#000000"},
+    "xgb":  {"fill": "#d95f02", "edge": "#000000"},
+    "lstm": {"fill": "#7570b3", "edge": "#000000"},
+    "gru":  {"fill": "#1b9e77", "edge": "#000000"}
 }
 
 
 def _read_master_csv(path: str) -> pd.DataFrame:
-    """Robustly reads the master results CSV, which is normally written as
-    utf-8-sig/comma but can end up as cp949/tab-delimited after being opened
-    and re-saved in Excel."""
     for encoding in ('utf-8-sig', 'cp949'):
         for sep in (',', '\t'):
             try:
@@ -49,11 +54,10 @@ def _read_master_csv(path: str) -> pd.DataFrame:
                     return df
             except (UnicodeDecodeError, pd.errors.ParserError):
                 continue
-    raise ValueError(f"Could not parse master CSV with known encodings/separators: {path}")
+    raise ValueError(f"Could not parse master CSV: {path}")
 
 
 def load_threshold_map(seed: int) -> dict:
-    """Reads (dataset, model) -> threshold from master_proposed_threshold_results.csv for the given seed."""
     master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
     threshold_map = {}
     df = _read_master_csv(master_csv)
@@ -88,9 +92,6 @@ def evaluate_one(dataset: str, model_name: str, threshold: float):
     raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
     _, report_df = evaluator.evaluate_proposed_level(raw_preds, threshold=threshold)
 
-    # Attach each disk's first-observed date in the test window (needed to express
-    # false-alarm timing as "days since disk entered observation", since a censored
-    # disk has no failure date to anchor against).
     first_seen = {d['serial_number']: pd.to_datetime(d['dates']).min() for d in raw_preds}
     report_df['first_seen_date'] = report_df['serial_number'].map(first_seen)
     report_df['days_since_observed'] = (
@@ -100,112 +101,125 @@ def evaluate_one(dataset: str, model_name: str, threshold: float):
     return report_df
 
 
-def plot_facet_grid(all_reports: dict, results_dir: str):
-    sns.set_theme(style="whitegrid")
-
-    # Figure 1: Failed disks - lead time from first alarm to actual failure (days)
-    fig1, axes1 = plt.subplots(len(DATASETS), len(MODELS), figsize=(20, 12), sharex=True)
-    # Figure 2: Healthy disks - false alarm timing since observation start (days).
-    # Not sharex: each dataset spans a very different day range on the log axis.
-    fig2, axes2 = plt.subplots(len(DATASETS), len(MODELS), figsize=(20, 12), sharex=False)
-
-    for i, dataset in enumerate(DATASETS):
-        for j, model_name in enumerate(MODELS):
-            key = (dataset, model_name.upper())
-            report_df = all_reports[key]
-            mfr = MANUFACTURER_MAP.get(dataset, dataset)
-
-            # --- Failed HDD: first-alarm lead time (hits only) ---
-            # Display window is capped at 180d for readability; the cap is applied
-            # BEFORE computing bins/median so the median line always matches what's drawn.
-            hits = report_df[(report_df['has_failed'] == 1) & (report_df['is_hit'] == 1)]
-            lead_times_full = hits['days_to_failure_at_alarm'].dropna().values
-            lead_times = lead_times_full[lead_times_full <= 180]
-            n_clipped_1 = len(lead_times_full) - len(lead_times)
-            ax1 = axes1[i, j]
-            if len(lead_times) > 0:
-                bins = np.arange(-0.5, lead_times.max() + 3.5, 3.0)
-                ax1.hist(lead_times, bins=bins, color="#2b5c8f", edgecolor="black", alpha=0.8)
-                ax1.axvline(np.median(lead_times), color="darkred", linestyle="--", linewidth=1.8,
-                            label=f"Median {np.median(lead_times):.0f}d")
-                ax1.legend(fontsize=8)
-            title_suffix_1 = f" (+{n_clipped_1} >180d)" if n_clipped_1 > 0 else ""
-            ax1.set_title(f"{mfr}\n{model_name.upper()} (n={len(lead_times_full)}{title_suffix_1})", fontsize=9)
-            if i == len(DATASETS) - 1:
-                ax1.set_xlabel("Days from First Alarm to Failure", fontsize=8)
-            if j == 0:
-                ax1.set_ylabel("Disk Count", fontsize=8)
-
-            # --- Healthy HDD: false alarm timing since observation start ---
-            # Disk histories here span years, so a linear axis buries everything near
-            # zero. Log1p-scale the x-axis instead of clipping, so the median line
-            # (computed on the exact same values that are drawn) always lines up.
-            fa = report_df[(report_df['has_failed'] == 0) & (report_df['is_false_alarm'] == 1)]
-            days_since = fa['days_since_observed'].dropna().values
-            days_since = days_since[days_since >= 0]
-            ax2 = axes2[i, j]
-            if len(days_since) > 0:
-                log_vals = np.log1p(days_since)
-                bins2 = np.linspace(0, max(log_vals.max(), 1.0), 25)
-                ax2.hist(log_vals, bins=bins2, color="#d9534f", edgecolor="black", alpha=0.8)
-                med = np.median(days_since)
-                ax2.axvline(np.log1p(med), color="darkblue", linestyle="--", linewidth=1.8,
-                            label=f"Median {med:.0f}d")
-                ax2.legend(fontsize=8)
-                tick_days = [0, 1, 7, 30, 90, 365, 1095, 3650]
-                tick_days = [d for d in tick_days if d <= days_since.max() * 1.05]
-                ax2.set_xticks(np.log1p(tick_days))
-                ax2.set_xticklabels([str(d) for d in tick_days], fontsize=7)
-            ax2.set_title(f"{mfr}\n{model_name.upper()} (n={len(days_since)})", fontsize=9)
-            if i == len(DATASETS) - 1:
-                ax2.set_xlabel("Days Since Observation Start (log scale)", fontsize=8)
-            if j == 0:
-                ax2.set_ylabel("Disk Count", fontsize=8)
-
-    fig1.suptitle(f"Failed HDD: First-Alarm Lead Time Before Actual Failure (Seed={SEED})", fontsize=14, fontweight="bold")
-    fig1.tight_layout(rect=[0, 0, 1, 0.96])
-    out1 = os.path.join(results_dir, f"seed{SEED}_failed_hdd_first_alarm_leadtime_grid.png")
-    fig1.savefig(out1, dpi=300)
-    plt.close(fig1)
-
-    fig2.suptitle(f"Healthy HDD: False Alarm Timing Since Observation Start (Seed={SEED})", fontsize=14, fontweight="bold")
-    fig2.tight_layout(rect=[0, 0, 1, 0.96])
-    out2 = os.path.join(results_dir, f"seed{SEED}_healthy_hdd_false_alarm_timing_grid.png")
-    fig2.savefig(out2, dpi=300)
-    plt.close(fig2)
-
-    print(f"[Plot Saved] -> {out1}")
-    print(f"[Plot Saved] -> {out2}")
-    return out1, out2
-
-
 def main():
-    results_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+    analysis_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+    results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+    os.makedirs(analysis_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
 
     threshold_map = load_threshold_map(SEED)
 
     print("=" * 80)
-    print(f" ALARM TIMING ANALYSIS (SEED={SEED}) - Failed-HDD First Alarm & Healthy-HDD False Alarms")
-    print(f" Datasets : {DATASETS}")
-    print(f" Models   : {MODELS}")
+    print(f" OPERATIONAL FALSE ALARM TIMING ANALYSIS - HGST 2x2 (SEED={SEED}) ")
     print("=" * 80)
 
-    all_reports = {}
-    for dataset in DATASETS:
-        for model_name in MODELS:
-            thresh = threshold_map.get((dataset, model_name.upper()))
-            if thresh is None:
-                raise KeyError(f"No Seed={SEED} threshold found for ({dataset}, {model_name.upper()}) in master_proposed_threshold_results.csv")
-            print(f"\n[Processing] {dataset} | {model_name.upper()} | threshold={thresh}")
-            report_df = evaluate_one(dataset, model_name, thresh)
-            all_reports[(dataset, model_name.upper())] = report_df
-
-            csv_path = os.path.join(results_dir, f"seed{SEED}_alarm_report_{dataset}_{model_name.upper()}.csv")
+    model_data = {}
+    for model_name in MODELS:
+        thresh = threshold_map.get((HDD_NAME, model_name.upper()))
+        if thresh is None:
+            thresh = 0.5
+        
+        csv_path = os.path.join(analysis_dir, f"seed42_alarm_report_{HDD_NAME}_{model_name.upper()}.csv")
+        if os.path.exists(csv_path):
+            report_df = pd.read_csv(csv_path)
+        else:
+            print(f"[Evaluating] {HDD_NAME} | {model_name.upper()} | threshold={thresh}")
+            report_df = evaluate_one(HDD_NAME, model_name, thresh)
             report_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
+            
+        # User defined operational false alarms:
+        # 1) Healthy HDDs with alarm (has_failed == 0 & alarm_triggered == 1)
+        # 2) Failed HDDs with early alarm > 30d before failure (has_failed == 1 & alarm_triggered == 1 & days_to_failure_at_alarm > 30)
+        h_fa = report_df[(report_df['has_failed'] == 0) & (report_df['alarm_triggered'] == 1)]
+        f_fa = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1) & (report_df['days_to_failure_at_alarm'] > 30)]
+        
+        combined_fa = pd.concat([h_fa, f_fa], ignore_index=True)
+        days_since = combined_fa['days_since_observed'].dropna().values
+        model_data[model_name] = days_since[days_since >= 0]
 
-    plot_facet_grid(all_reports, results_dir)
-    print("\nDone.")
+    # Publication Quality Styling
+    plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans', 'Calibri', 'sans-serif']
+    plt.rcParams['axes.edgecolor'] = '#111111'
+    plt.rcParams['axes.linewidth'] = 1.1
+
+    sns.set_theme(style="ticks", palette="muted")
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
+    fig.suptitle(
+        "False Alarm Occurrence Timing Since Observation Start — HGST (20HUH721212ALN604)",
+        fontsize=16, fontweight="bold", y=0.98, color="#111111"
+    )
+
+    positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    labels = ["(a)", "(b)", "(c)", "(d)"]
+
+    max_days = 2600
+    bins = np.linspace(0, max_days, 36)
+
+    max_pct = 0.0
+    for m in MODELS:
+        days = model_data[m]
+        if len(days) > 0:
+            counts, _ = np.histogram(days, bins=bins)
+            pcts = (counts / len(days)) * 100.0
+            if len(pcts) > 0 and pcts.max() > max_pct:
+                max_pct = pcts.max()
+
+    ylim_top = min(100.0, max(20.0, np.ceil(max_pct + 4.0)))
+
+    for idx, m in enumerate(MODELS):
+        r, c = positions[idx]
+        ax = axes[r, c]
+        style = STYLE_CONFIG[m]
+        m_title = MODEL_TITLES[m]
+        days = model_data[m]
+        n_disks = len(days)
+
+        if n_disks > 0:
+            sns.histplot(
+                x=days,
+                bins=bins,
+                stat="percent",
+                kde=False,
+                color=style["fill"],
+                edgecolor=style["edge"],
+                alpha=0.72,
+                linewidth=0.9,
+                ax=ax
+            )
+
+        ax.set_title(
+            f"{labels[idx]} {m_title}  (n = {n_disks} HDDs)",
+            fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111"
+        )
+
+        ax.set_xlabel("Days Since Observation Start (Days)", fontsize=11, fontweight="bold", labelpad=6)
+        if c == 0:
+            ax.set_ylabel("False Alarm Frequency (%)", fontsize=11, fontweight="bold", labelpad=6)
+        else:
+            ax.set_ylabel("")
+
+        ax.set_xlim(0, max_days)
+        ax.set_ylim(0, ylim_top)
+        ax.set_xticks(np.arange(0, max_days + 1, 500))
+
+        ax.label_outer()
+        ax.set_xlabel("Days Since Observation Start (Days)", fontsize=11, fontweight="bold", labelpad=6)
+
+        ax.grid(True, axis="y", linestyle=":", alpha=0.20, color="#666666")
+        ax.grid(False, axis="x")
+        sns.despine(ax=ax, top=True, right=True)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    out2 = os.path.join(results_dir, "seed42_healthy_hdd_false_alarm_timing_grid.png")
+
+    plt.savefig(out2, dpi=300, bbox_inches="tight")
+    plt.close()
+
+    print("\n" + "=" * 80)
+    print(" [SUCCESS] Operational False Alarm Timing HGST 2x2 Grid Saved!")
+    print(f" Saved to:\n  -> {out2}")
+    print("=" * 80 + "\n")
 
 
 if __name__ == "__main__":

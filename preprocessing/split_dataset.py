@@ -74,6 +74,21 @@ def split_and_save(input_path: str, output_dir: str, train_ratio: float = 0.8, v
     val_df = df[df['serial_number'].isin(val_set)].copy()
     test_df = df[df['serial_number'].isin(test_set)].copy()
 
+    # 우측 검열(Censored, 정상 종료) HDD의 마지막 30일(lead_time) 제거 로직 적용
+    # 학습(Train), 검증(Val), 테스트(Test) 세트 모두 동일하게 유지 적용
+    def _trim_censored_tail(d: pd.DataFrame, name: str, lead_time: int = 30) -> pd.DataFrame:
+        drop_mask = (d['censored'] == 1) & (d['RUL'] < lead_time)
+        dropped = int(drop_mask.sum())
+        if dropped > 0:
+            print(f"  [{name.upper()}] 우측 검열 HDD 마지막 {lead_time}일 제거: {dropped:,}행 삭제됨")
+            return d[~drop_mask].copy()
+        return d
+
+    print("Trimming last 30 days of right-censored (non-failed) HDD units across Train, Val, and Test sets...")
+    train_df = _trim_censored_tail(train_df, "train")
+    val_df = _trim_censored_tail(val_df, "val")
+    test_df = _trim_censored_tail(test_df, "test")
+
     # 결과 폴더 생성
     os.makedirs(output_dir, exist_ok=True)
 
