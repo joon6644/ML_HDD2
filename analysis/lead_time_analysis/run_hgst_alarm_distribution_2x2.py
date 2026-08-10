@@ -39,6 +39,26 @@ MODEL_TITLES = {
 }
 
 def collect_alarm_data(hdd_name: str, model_name: str, threshold: float):
+    model_upper = model_name.upper()
+    lookup_key = "LGBM" if model_name.lower() == "lgbm" else ("XGB" if model_name.lower() == "xgb" else model_name.upper())
+
+    # Fast Path: Check if cached report CSV exists
+    reports_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis", "reports")
+    report_csv = os.path.join(reports_dir, f"seed42_alarm_report_{hdd_name}_{lookup_key}.csv")
+
+    if os.path.exists(report_csv):
+        print(f"[CACHE HIT] Instant load from report CSV -> {report_csv}")
+        df = pd.read_csv(report_csv)
+        df_rec = pd.DataFrame({
+            'serial_number': df['serial_number'],
+            'has_failed': df['has_failed'],
+            'total_alarm_count': df['alarm_triggered'].fillna(0).astype(int),
+            'valid_alarm_count': df['is_hit'].fillna(0).astype(int),
+            'false_alarm_count': df['is_false_alarm'].fillna(0).astype(int)
+        })
+        return df_rec[df_rec['total_alarm_count'] > 0]
+
+    print(f"\n[Processing] Running inference for Model: {model_upper} | Threshold: {threshold:.4f}")
     hdd_path = os.path.join(PROJECT_ROOT, "data", "splitted", hdd_name)
     train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name)
     is_seq = model_name in ['lstm', 'gru']

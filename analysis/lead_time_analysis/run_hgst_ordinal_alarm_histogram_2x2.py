@@ -27,7 +27,7 @@ import config
 from data_loader import load_dataset
 from checkpoint_utils import CHECKPOINT_DIR
 from evaluator import RollingEvaluator
-from analysis.lead_time_analysis.run_operational_timeline_analysis import load_checkpoint_flexible
+from analysis.lead_time_analysis.run_operational_timeline_analysis import load_checkpoint_flexible, load_threshold_map
 
 config.PIPELINE_VERSION = "v2"
 
@@ -38,16 +38,38 @@ MODEL_TITLES = {
     "gru": "GRU"
 }
 
-# Exact Seed 42 Proposed Thresholds matching the summary benchmark table
-SEED42_THRESHOLDS = {
-    "lgbm": 0.99,
-    "xgb": 0.47,
-    "lstm": 0.09,
-    "gru": 0.16
-}
-
 
 def collect_ordinal_alarm_data(hdd_name: str, model_name: str, threshold: float):
+    model_upper = model_name.upper()
+    lookup_key = "LGBM" if model_name.lower() == "lgbm" else ("XGB" if model_name.lower() == "xgb" else model_name.upper())
+
+    # Fast Path: Check if cached report CSV exists
+    reports_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis", "reports")
+    report_csv = os.path.join(reports_dir, f"seed42_alarm_report_{hdd_name}_{lookup_key}.csv")
+
+    if os.path.exists(report_csv):
+        print(f"[CACHE HIT] Instant load from report CSV -> {report_csv}")
+        df = pd.read_csv(report_csv)
+        alarm_records = []
+        hits = df[(df['has_failed'] == 1) & (df['alarm_triggered'] == 1)]
+        for _, row in hits.iterrows():
+            alarm_records.append({
+                'serial_number': row['serial_number'],
+                'alarm_index': 1,
+                'is_valid': 1,
+                'is_false': 0
+            })
+        fps = df[(df['has_failed'] == 0) & (df['alarm_triggered'] == 1)]
+        for _, row in fps.iterrows():
+            alarm_records.append({
+                'serial_number': row['serial_number'],
+                'alarm_index': 1,
+                'is_valid': 0,
+                'is_false': 1
+            })
+        return pd.DataFrame(alarm_records)
+
+    print(f"\n[Processing] Running inference for Model: {model_upper} | Threshold: {threshold:.4f}")
     hdd_path = os.path.join(PROJECT_ROOT, "data", "splitted", hdd_name)
     train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name)
     is_seq = model_name in ['lstm', 'gru']
@@ -231,6 +253,7 @@ def plot_ordinal_alarm_histogram_2x2(model_data_map: dict, hdd_name: str, output
 def main():
     hdd_name = "HGST_20HUH721212ALN604"
     models = ["lgbm", "xgb", "lstm", "gru"]
+    threshold_map = load_threshold_map()
 
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     os.makedirs(results_dir, exist_ok=True)
@@ -241,7 +264,8 @@ def main():
 
     model_data_map = {}
     for m in models:
-        thresh = SEED42_THRESHOLDS[m]
+        lookup_key = "LGBM" if m.lower() == "lgbm" else ("XGB" if m.lower() == "xgb" else m.upper())
+        thresh = threshold_map.get((hdd_name, lookup_key), 0.5)
         print(f"\n[Processing] Model: {MODEL_TITLES[m]} | Threshold: {thresh:.4f}")
 
         df_rec = collect_ordinal_alarm_data(hdd_name, m, thresh)

@@ -15,6 +15,10 @@ from imbalance import EasyEnsembleModelWrapper
 
 CHECKPOINT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "checkpoints")
 
+has_torch = (torch is not None) and hasattr(torch, 'nn')
+TorchModule = torch.nn.Module if has_torch else type('DummyModule', (), {})
+
+
 def get_checkpoint_path(model_name: str, imbalance: str, seed: int, lead_time: int, dataset_name: str, extra_tag: str = "") -> str:
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     clean_ds = os.path.basename(dataset_name.rstrip('/\\'))
@@ -58,7 +62,7 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
         payload["is_pytorch"] = model.is_pytorch
         sub_weights = []
         for m in model.models:
-            if isinstance(m, torch.nn.Module):
+            if isinstance(m, TorchModule):
                 sub_weights.append({
                     "class_name": m.__class__.__name__,
                     "state_dict": m.state_dict(),
@@ -68,7 +72,7 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
             else:
                 sub_weights.append(m)
         payload["models"] = sub_weights
-    elif isinstance(model, torch.nn.Module):
+    elif isinstance(model, TorchModule):
         payload["type"] = "pytorch"
         payload["class_name"] = model.__class__.__name__
         payload["state_dict"] = model.state_dict()
@@ -77,7 +81,11 @@ def save_checkpoint(model, model_name: str, imbalance: str, seed: int, lead_time
         payload["type"] = "sklearn_or_tree"
         payload["model_obj"] = model
 
-    torch.save(payload, ckpt_path)
+    if has_torch:
+        torch.save(payload, ckpt_path)
+    else:
+        joblib.dump(payload, ckpt_path)
+
     print(f"[Checkpoint Manager] Model successfully saved! ({os.path.getsize(ckpt_path) / (1024*1024):.2f} MB)")
 
 def _validate_checkpoint_compatibility(payload, ckpt_path, features=None, window_size=None):
@@ -109,7 +117,12 @@ def load_checkpoint(model_name: str, imbalance: str, seed: int, lead_time: int, 
 
     print(f"\n[Checkpoint Manager] Found existing checkpoint: {ckpt_path}")
     print(f"[Checkpoint Manager] Loading pre-trained model weights directly (Skipping training)...")
-    payload = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+
+    if has_torch:
+        payload = torch.load(ckpt_path, map_location='cpu', weights_only=False)
+    else:
+        payload = joblib.load(ckpt_path)
+
     _validate_checkpoint_compatibility(payload, ckpt_path, features=features, window_size=window_size)
 
     ckpt_type = payload.get("type")
@@ -138,13 +151,13 @@ def load_checkpoint(model_name: str, imbalance: str, seed: int, lead_time: int, 
                     raise ValueError(f"Unknown PyTorch model class in checkpoint: {cls_name}")
                 
                 m.load_state_dict(st_dict)
-                if torch.cuda.is_available():
+                if torch is not None and torch.cuda.is_available():
                     m = m.cuda()
                 sub_models.append(m)
             else:
                 sub_models.append(item)
         model = EasyEnsembleModelWrapper(sub_models, is_pytorch=is_pytorch)
-        if torch.cuda.is_available() and is_pytorch:
+        if torch is not None and torch.cuda.is_available() and is_pytorch:
             model.to("cuda")
         return model
 
@@ -162,7 +175,7 @@ def load_checkpoint(model_name: str, imbalance: str, seed: int, lead_time: int, 
             raise ValueError(f"Unknown PyTorch model class in checkpoint: {cls_name}")
         
         model.load_state_dict(st_dict)
-        if torch.cuda.is_available():
+        if torch is not None and torch.cuda.is_available():
             model = model.cuda()
         return model
 

@@ -27,7 +27,7 @@ import config
 from data_loader import load_dataset
 from checkpoint_utils import CHECKPOINT_DIR
 from evaluator import RollingEvaluator
-from analysis.lead_time_analysis.run_operational_timeline_analysis import load_checkpoint_flexible
+from analysis.lead_time_analysis.run_operational_timeline_analysis import load_checkpoint_flexible, load_threshold_map
 
 config.PIPELINE_VERSION = "v2"
 
@@ -36,13 +36,6 @@ MODEL_TITLES = {
     "xgb": "XGBoost",
     "lstm": "LSTM",
     "gru": "GRU"
-}
-
-SEED42_THRESHOLDS = {
-    "lgbm": 0.99,
-    "xgb": 0.47,
-    "lstm": 0.09,
-    "gru": 0.16
 }
 
 
@@ -222,6 +215,7 @@ def plot_cumulative_detection_2x2(model_data_map: dict, hdd_name: str, output_pa
 def main():
     hdd_name = "HGST_20HUH721212ALN604"
     models = ["lgbm", "xgb", "lstm", "gru"]
+    threshold_map = load_threshold_map()
 
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     os.makedirs(results_dir, exist_ok=True)
@@ -232,7 +226,8 @@ def main():
 
     model_data_map = {}
     for m in models:
-        thresh = SEED42_THRESHOLDS[m]
+        lookup_key = "LGBM" if m.lower() == "lgbm" else ("XGB" if m.lower() == "xgb" else m.upper())
+        thresh = threshold_map.get((hdd_name, lookup_key), 0.5)
         print(f"\n[Processing] Model: {MODEL_TITLES[m]} | Threshold: {thresh:.4f}")
 
         data = collect_cumulative_detection_data(hdd_name, m, thresh, max_n=50)

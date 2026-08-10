@@ -12,8 +12,10 @@ plt.rcParams['axes.linewidth'] = 1.1
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+REPORTS_DIR = os.path.join(RESULTS_DIR, "reports")
 ANALYSIS_DIR = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
 os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(REPORTS_DIR, exist_ok=True)
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
 HDD_NAME = "HGST_20HUH721212ALN604"
@@ -49,27 +51,48 @@ STYLE_CONFIG = {
 }
 
 
+def find_report_csv(model_code: str) -> str:
+    for d in [REPORTS_DIR, RESULTS_DIR, ANALYSIS_DIR]:
+        path = os.path.join(d, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def load_lead_time_data(model_code: str) -> np.ndarray:
-    """Load first alarm lead time dataset."""
-    filename = f"lead_time_{HDD_NAME}_{model_code}_all_alarms.csv"
-    path = os.path.join(RESULTS_DIR, filename)
-    if not os.path.exists(path):
-        path = os.path.join(ANALYSIS_DIR, filename)
-    
-    if os.path.exists(path):
-        df = pd.read_csv(path)
-        return df['lead_time_days'].values
-    else:
-        path_alt = os.path.join(ANALYSIS_DIR, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
-        if os.path.exists(path_alt):
-            df = pd.read_csv(path_alt)
-            hits = df[(df['has_failed'] == 1) & (df['is_hit'] == 1)]
-            return hits['days_to_failure_at_alarm'].dropna().values
-        else:
-            raise FileNotFoundError(f"Lead time dataset missing for {model_code}")
+    path = find_report_csv(model_code)
+    if not (path and os.path.exists(path)):
+        raise FileNotFoundError(
+            f"[STRICT ERROR] Missing required lead time report CSV for dataset='{HDD_NAME}', model='{model_code}'. "
+            f"Experiments must not proceed without valid inference report data."
+        )
+    df = pd.read_csv(path)
+    hits = df[(df['has_failed'] == 1) & (df['is_hit'] == 1)]
+    return hits['days_to_failure_at_alarm'].dropna().values
+
+
+def ensure_alarm_reports():
+    missing = False
+    for m_code, _ in MODELS:
+        if find_report_csv(m_code) is None:
+            missing = True
+            break
+    if missing:
+        script_path = os.path.join(ANALYSIS_DIR, "run_alarm_timing_seed42_analysis.py")
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"[STRICT ERROR] Generator script missing: {script_path}")
+        print("\n[AUTO-GENERATE] Required lead time CSVs missing. Triggering run_alarm_timing_seed42_analysis.py...")
+        import subprocess
+        res = subprocess.run([sys.executable, script_path], check=False)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"[STRICT ERROR] Automatic report generation failed (exit code {res.returncode}). "
+                f"Cannot generate visualization without complete model checkpoints and data."
+            )
 
 
 def main():
+    ensure_alarm_reports()
     sns.set_theme(style="ticks", palette="muted")
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
     
@@ -90,13 +113,16 @@ def main():
 
     for m_code, _ in MODELS:
         lead_times_full = load_lead_time_data(m_code)
-        lead_times_disp = lead_times_full[lead_times_full <= 180]
-        true_median = float(np.median(lead_times_full))
-        
-        counts, _ = np.histogram(lead_times_disp, bins=bins, density=True)
-        if len(counts) > 0 and counts.max() > max_density:
-            max_density = counts.max()
-            
+        if len(lead_times_full) > 0:
+            lead_times_disp = lead_times_full[lead_times_full <= 180]
+            true_median = float(np.median(lead_times_full))
+            counts, _ = np.histogram(lead_times_disp, bins=bins, density=True)
+            if len(counts) > 0 and not np.isnan(counts.max()) and counts.max() > max_density:
+                max_density = counts.max()
+        else:
+            lead_times_disp = np.array([], dtype=float)
+            true_median = 0.0
+
         model_data[m_code] = {
             "full": lead_times_full,
             "disp": lead_times_disp,
@@ -115,27 +141,34 @@ def main():
         lead_times_display = data["disp"]
         true_median_lt = data["median"]
 
-        # Solid Fill Histogram with Black Borders
-        ax.hist(
-            lead_times_display,
-            bins=bins,
-            density=True,
-            facecolor=style["fill"],
-            edgecolor=style["edge"],
-            alpha=0.72,
-            linewidth=0.9,
-            label="Density Hist"
-        )
+        if len(lead_times_full) > 0:
+            # Solid Fill Histogram with Black Borders
+            ax.hist(
+                lead_times_display,
+                bins=bins,
+                density=True,
+                facecolor=style["fill"],
+                edgecolor=style["edge"],
+                alpha=0.72,
+                linewidth=0.9,
+                label="Density Hist"
+            )
 
-        # Vertical Line for Median
-        ax.axvline(
-            true_median_lt,
-            color=style["median_line"],
-            linestyle="--",
-            linewidth=2.4,
-            zorder=5,
-            label=f"Median: {true_median_lt:.1f} days"
-        )
+            # Vertical Line for Median
+            ax.axvline(
+                true_median_lt,
+                color=style["median_line"],
+                linestyle="--",
+                linewidth=2.4,
+                zorder=5,
+                label=f"Median: {true_median_lt:.1f} days"
+            )
+        else:
+            ax.text(
+                0.5, 0.5, "Data Pending\n(Run analysis script)",
+                ha='center', va='center', transform=ax.transAxes,
+                fontsize=11, color='#777777', style='italic'
+            )
 
         # Subplot Formatting
         ax.set_title(

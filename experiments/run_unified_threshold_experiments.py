@@ -38,6 +38,48 @@ def get_cached_dataset(data_path: str, drop_failure_day: bool, model: str):
     return _DATASET_CACHE[cache_key]
 
 
+import sqlite3
+
+def is_experiment_already_completed(results_dir: str, model_name: str, dataset_name: str, seed: int) -> bool:
+    """
+    Checks if an experiment (Model, 데이터, Seed) has already been computed and logged in SQLite/CSV.
+    """
+    db_path = os.path.join(results_dir, "experiments.db")
+    model_norm = model_name.upper()
+    ds_norm = os.path.basename(dataset_name)
+
+    # 1. Check SQLite DB
+    if os.path.exists(db_path):
+        try:
+            with sqlite3.connect(db_path, timeout=10.0) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT COUNT(*) FROM master_row_threshold_results WHERE UPPER(Model)=? AND 데이터=? AND Seed=?", (model_norm, ds_norm, seed))
+                c1 = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM master_proposed_threshold_results WHERE UPPER(Model)=? AND 데이터=? AND Seed=?", (model_norm, ds_norm, seed))
+                c2 = cursor.fetchone()[0]
+                if c1 > 0 and c2 > 0:
+                    return True
+        except Exception:
+            pass
+
+    # 2. Check CSV files as fallback
+    row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
+    prop_csv = os.path.join(results_dir, "master_proposed_threshold_results.csv")
+    if os.path.exists(row_csv) and os.path.exists(prop_csv):
+        try:
+            from evaluator import _read_csv_robust
+            df1 = _read_csv_robust(row_csv)
+            df2 = _read_csv_robust(prop_csv)
+            m1 = (df1['Model'].astype(str).str.upper() == model_norm) & (df1['데이터'].astype(str) == ds_norm) & (df1['Seed'].astype(int) == int(seed))
+            m2 = (df2['Model'].astype(str).str.upper() == model_norm) & (df2['데이터'].astype(str) == ds_norm) & (df2['Seed'].astype(int) == int(seed))
+            if m1.any() and m2.any():
+                return True
+        except Exception:
+            pass
+
+    return False
+
+
 def reset_master_results(results_dir: str):
     """
     Resets/removes existing master CSV result files so new experiments accumulate from scratch.
@@ -76,6 +118,14 @@ def run_unified_threshold_experiments():
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.join(project_dir, "results")
     os.makedirs(results_dir, exist_ok=True)
+
+    if torch is None and any(m in ['lstm', 'gru'] for m in args.models):
+        print("\n" + "!" * 80)
+        print("[WARNING] PyTorch (torch) is not installed in the currently active Python environment.")
+        print(" -> LSTM / GRU models require PyTorch (with GPU/CUDA support).")
+        print(r" -> Please run using the project virtual environment:")
+        print(r"    .\venv\Scripts\python.exe experiments\run_unified_threshold_experiments.py")
+        print("!" * 80 + "\n")
 
     master_row_csv_path = os.path.join(results_dir, "master_row_threshold_results.csv")
     master_proposed_csv_path = os.path.join(results_dir, "master_proposed_threshold_results.csv")
@@ -138,6 +188,12 @@ def run_unified_threshold_experiments():
             seed = t['seed']
             imbalance = args.imbalance
 
+            # Skip if task is already completed and saved in results
+            if not args.reset and is_experiment_already_completed(results_dir, model_name, ds, seed):
+                print(f"[SKIP] DATA={ds} | MODEL={model_name.upper()} | SEED={seed} already completed in results. Skipping inference.")
+                successful_runs += 1
+                continue
+
             print(f"\n>>> [Dataset: {ds} | Task {idx}/{len(ds_tasks)}] MODEL={model_name.upper()} | SEED={seed}")
             print("-" * 80)
 
@@ -151,15 +207,13 @@ def run_unified_threshold_experiments():
                 # B. Checkpoint reload or model training
                 cached_model = load_checkpoint(model_name, imbalance, seed, config.TARGET_LEAD_TIME, data_path, input_dim=len(features), features=features, window_size=window_size if is_sequence_model else None)
 
-                if is_sequence_model:
-                    X_val_seq, y_val_seq = build_sequences(val_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
-                    X_test_seq, y_test_seq = build_sequences(test_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
-                    if cached_model is None:
+                if cached_model is None:
+                    if is_sequence_model:
+                        X_val_seq, y_val_seq = build_sequences(val_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
                         X_train_seq, y_train_seq = build_sequences(train_df, features, window_size=window_size, lead_time=config.TARGET_LEAD_TIME)
-                else:
-                    y_val = create_binary_target(val_df, lead_time=config.TARGET_LEAD_TIME)
-                    X_val_2d = val_df[features].values
-                    if cached_model is None:
+                    else:
+                        y_val = create_binary_target(val_df, lead_time=config.TARGET_LEAD_TIME)
+                        X_val_2d = val_df[features].values
                         y_train = create_binary_target(train_df, lead_time=config.TARGET_LEAD_TIME)
                         X_train_2d = train_df[features].values
 

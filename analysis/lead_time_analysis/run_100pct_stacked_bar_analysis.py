@@ -37,71 +37,87 @@ DEFAULT_THRESHOLDS = {
 
 
 def load_threshold_map() -> dict:
-    threshold_map = DEFAULT_THRESHOLDS.copy()
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_experiment_results.csv")
+    threshold_map = {}
+    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
     if os.path.exists(master_csv):
         try:
             df = pd.read_csv(master_csv, encoding='utf-8-sig')
             for _, row in df.iterrows():
                 hdd = str(row['데이터']).strip()
                 model_name = str(row['Model']).upper()
-                thresh = float(row['Threshold'])
+                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in row else 'Threshold'
+                thresh = float(row[thresh_col])
                 threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Loaded thresholds from master CSV -> {master_csv}")
+            print(f"[Threshold Loader] Loaded Proposed-Opt thresholds from CSV -> {master_csv}")
         except Exception as e:
-            print(f"[Threshold Loader] Warning: Could not read master CSV ({e}). Using defaults.")
+            print(f"[Threshold Loader] Error loading master CSV: {e}")
     return threshold_map
 
 
 def extract_alarm_counts_by_window(hdd_name: str, model_name: str, threshold: float):
     hdd_path = os.path.join(PROJECT_ROOT, "data", "splitted", hdd_name)
     model_upper = model_name.upper()
+    lookup_key = "LGBM" if model_name.lower() == "lgbm" else ("XGB" if model_name.lower() == "xgb" else model_name.upper())
 
-    print(f"[Processing] Model: {model_upper} | Threshold: {threshold:.4f}")
+    # 1. Fast Path: Reuse existing cached Report CSV if available (0.01s load time)
+    reports_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis", "reports")
+    report_csv = os.path.join(reports_dir, f"seed42_alarm_report_{hdd_name}_{lookup_key}.csv")
+    
+    if os.path.exists(report_csv):
+        print(f"[CACHE HIT] Instant load from report CSV -> {report_csv}")
+        df = pd.read_csv(report_csv)
+        hits = df[(df['has_failed'] == 1) & (df['alarm_triggered'] == 1)]
+        arr = hits['days_to_failure_at_alarm'].dropna().values
+        arr = arr[arr >= 0]
+    else:
+        print(f"[Processing] Running inference for Model: {model_upper} | Threshold: {threshold:.4f}")
 
-    train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name.lower())
+        train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name.lower())
 
-    is_sequence_model = (model_name.lower() in ['lstm', 'gru'])
-    ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
-    ckpt_tag = "cw0_focal0"
+        is_sequence_model = (model_name.lower() in ['lstm', 'gru'])
+        ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
 
-    model = load_checkpoint(
-        model_name.lower(), "none", config.SEED, config.TARGET_LEAD_TIME, hdd_path,
-        input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size
-    )
+        model = load_checkpoint(
+            model_name.lower(), "none", config.SEED, config.TARGET_LEAD_TIME, hdd_path,
+            input_dim=len(features), features=features, window_size=ckpt_window_size
+        )
 
-    if model is None:
-        raise FileNotFoundError(f"Checkpoint missing for model '{model_name}' on HDD '{hdd_name}'")
+        if model is None:
+            raise FileNotFoundError(
+                f"[STRICT ERROR] Checkpoint missing for model '{model_name}' on HDD '{hdd_name}'. "
+                f"Experiments must not proceed without valid trained model weights."
+            )
 
-    model_type = 'pytorch_class' if is_sequence_model or model_name.lower() == 'mlp' else model_name.lower()
+        model_type = 'pytorch_class' if is_sequence_model or model_name.lower() == 'mlp' else model_name.lower()
 
-    evaluator = RollingEvaluator(
-        model=model,
-        features=features,
-        window_size=config.WINDOW_SIZE if is_sequence_model else 1,
-        device='cuda' if (torch is not None and torch.cuda.is_available()) else 'cpu',
-        model_type=model_type,
-        seed=config.SEED
-    )
+        evaluator = RollingEvaluator(
+            model=model,
+            features=features,
+            window_size=config.WINDOW_SIZE if is_sequence_model else 1,
+            device='cuda' if (torch is not None and torch.cuda.is_available()) else 'cpu',
+            model_type=model_type,
+            seed=config.SEED
+        )
 
-    raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
+        raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
 
-    days_to_failure_list = []
-    for disk in raw_preds:
-        if not disk['has_failed']:
-            continue
-        failure_date = disk['failure_date']
-        dates = disk['dates']
-        preds = disk['preds']
+        days_to_failure_list = []
+        for disk in raw_preds:
+            if not disk['has_failed']:
+                continue
+            failure_date = disk['failure_date']
+            dates = disk['dates']
+            preds = disk['preds']
 
-        alarm_indices = np.where(preds >= threshold)[0]
-        for idx in alarm_indices:
-            alarm_date = pd.to_datetime(dates[idx])
-            dtf = (failure_date - alarm_date).days
-            if dtf >= 0:
-                days_to_failure_list.append(dtf)
+            alarm_indices = np.where(preds >= threshold)[0]
+            for idx in alarm_indices:
+                alarm_date = pd.to_datetime(dates[idx])
+                dtf = (failure_date - alarm_date).days
+                if dtf >= 0:
+                    days_to_failure_list.append(dtf)
 
-    arr = np.array(days_to_failure_list)
+        arr = np.array(days_to_failure_list)
+
     tot = len(arr)
 
     c_0_10 = int(np.sum((arr >= 0) & (arr <= 10)))
@@ -130,7 +146,9 @@ def main():
     models = ["lgbm", "xgb", "lstm", "gru"]
 
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+    reports_dir = os.path.join(results_dir, "reports")
     os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(reports_dir, exist_ok=True)
 
     print("=" * 80)
     print(f"  HGST_20HUH721212ALN604 - 100% STACKED BAR ALARM SUMMARY ANALYSIS  ")
@@ -144,7 +162,7 @@ def main():
         rows.append(res)
 
     df_summary = pd.DataFrame(rows)
-    csv_path = os.path.join(results_dir, f"{hdd_name}_alarm_temporal_summary_table.csv")
+    csv_path = os.path.join(reports_dir, f"{hdd_name}_alarm_temporal_summary_table.csv")
     df_summary.to_csv(csv_path, index=False, encoding='utf-8-sig')
 
     # Plot 100% Horizontal Stacked Bar Chart

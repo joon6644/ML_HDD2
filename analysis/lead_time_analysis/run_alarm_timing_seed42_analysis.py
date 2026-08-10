@@ -67,12 +67,12 @@ def load_threshold_map(seed: int) -> dict:
     return threshold_map
 
 
-def evaluate_one(dataset: str, model_name: str, threshold: float):
+def evaluate_one(dataset: str, model_name: str, threshold: float = None):
     data_path = os.path.join(PROJECT_ROOT, "data", "splitted", dataset)
     is_sequence_model = model_name in ['lstm', 'gru']
     window_size = config.WINDOW_SIZE if is_sequence_model else 1
 
-    _, _, test_df, features = load_dataset(data_path, model=model_name)
+    _, val_df, test_df, features = load_dataset(data_path, model=model_name)
 
     model = load_checkpoint(
         model_name, "none", SEED, config.TARGET_LEAD_TIME, data_path,
@@ -80,7 +80,10 @@ def evaluate_one(dataset: str, model_name: str, threshold: float):
         window_size=window_size if is_sequence_model else None
     )
     if model is None:
-        raise FileNotFoundError(f"Checkpoint missing for model='{model_name}' dataset='{dataset}' seed={SEED}")
+        raise FileNotFoundError(
+            f"[STRICT ERROR] Checkpoint missing for model='{model_name}' on dataset='{dataset}' (seed={SEED}). "
+            f"Experiments must not proceed without valid trained model weights."
+        )
 
     model_type = 'pytorch_class' if is_sequence_model else model_name
     evaluator = RollingEvaluator(
@@ -88,6 +91,12 @@ def evaluate_one(dataset: str, model_name: str, threshold: float):
         device='cuda' if (torch is not None and torch.cuda.is_available()) else 'cpu',
         model_type=model_type, seed=SEED
     )
+
+    if threshold is None or threshold <= 0:
+        print(f"[Optimal Threshold Search] Searching best threshold for model='{model_name}' dataset='{dataset}' via RollingEvaluator.find_best_threshold...")
+        val_raw_preds = evaluator.get_raw_predictions(val_df, lead_time=config.TARGET_LEAD_TIME)
+        threshold, max_val_recall = evaluator.find_best_threshold(val_raw_preds, max_far=config.MAX_FAR, lead_time=config.TARGET_LEAD_TIME)
+        print(f"[Optimal Threshold Found] {model_name} optimal threshold = {threshold:.4f} (Max Val Recall @ FAR <= {config.MAX_FAR:.2%}: {max_val_recall:.4%})")
 
     raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
     _, report_df = evaluator.evaluate_proposed_level(raw_preds, threshold=threshold)
@@ -104,8 +113,10 @@ def evaluate_one(dataset: str, model_name: str, threshold: float):
 def main():
     analysis_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+    reports_dir = os.path.join(results_dir, "reports")
     os.makedirs(analysis_dir, exist_ok=True)
     os.makedirs(results_dir, exist_ok=True)
+    os.makedirs(reports_dir, exist_ok=True)
 
     threshold_map = load_threshold_map(SEED)
 
@@ -116,15 +127,23 @@ def main():
     model_data = {}
     for model_name in MODELS:
         thresh = threshold_map.get((HDD_NAME, model_name.upper()))
-        if thresh is None:
-            thresh = 0.5
         
-        csv_path = os.path.join(analysis_dir, f"seed42_alarm_report_{HDD_NAME}_{model_name.upper()}.csv")
-        if os.path.exists(csv_path):
+        fname = f"seed42_alarm_report_{HDD_NAME}_{model_name.upper()}.csv"
+        csv_path = None
+        for d in [reports_dir, results_dir, analysis_dir]:
+            p = os.path.join(d, fname)
+            if os.path.exists(p):
+                csv_path = p
+                break
+
+        if csv_path and os.path.exists(csv_path):
             report_df = pd.read_csv(csv_path)
         else:
             print(f"[Evaluating] {HDD_NAME} | {model_name.upper()} | threshold={thresh}")
             report_df = evaluate_one(HDD_NAME, model_name, thresh)
+            if report_df is None:
+                continue
+            csv_path = os.path.join(reports_dir, fname)
             report_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
             
         # User defined operational false alarms:
@@ -157,7 +176,7 @@ def main():
 
     max_pct = 0.0
     for m in MODELS:
-        days = model_data[m]
+        days = model_data.get(m, np.array([], dtype=float))
         if len(days) > 0:
             counts, _ = np.histogram(days, bins=bins)
             pcts = (counts / len(days)) * 100.0
@@ -171,7 +190,7 @@ def main():
         ax = axes[r, c]
         style = STYLE_CONFIG[m]
         m_title = MODEL_TITLES[m]
-        days = model_data[m]
+        days = model_data.get(m, np.array([], dtype=float))
         n_disks = len(days)
 
         if n_disks > 0:

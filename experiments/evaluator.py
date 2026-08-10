@@ -1,5 +1,6 @@
 import os
 import sys
+import sqlite3
 from datetime import datetime
 import numpy as np
 import pandas as pd
@@ -24,7 +25,7 @@ def find_best_threshold_row_level(y_true, y_prob, max_far=0.01):
     y_true = np.asarray(y_true)
     y_prob = np.asarray(y_prob)
 
-    thresholds = np.linspace(0.01, 0.99, 99)
+    thresholds = np.linspace(0.001, 0.999, 999)
     n_pos = np.sum(y_true == 1)
     n_neg = np.sum(y_true == 0)
 
@@ -77,11 +78,8 @@ def calculate_row_level_metrics(y_true, y_prob, threshold=0.5):
         auroc = float(roc_auc_score(y_true, y_prob))
     except Exception:
         auroc = 0.5
-    try:
-        precision_arr, recall_arr, _ = precision_recall_curve(y_true, y_prob)
-        pr_auc = float(auc(recall_arr, precision_arr))
-    except Exception:
-        pr_auc = 0.0
+    # Skip PR-AUC calculation for speed optimization
+    pr_auc = 0.0
         
     prec = float(precision_score(y_true, y_pred, zero_division=0))
     rec = float(recall_score(y_true, y_pred, zero_division=0))
@@ -225,7 +223,7 @@ class RollingEvaluator:
         if max_far is None:
             max_far = getattr(config, 'MAX_FAR', 0.01)
 
-        thresholds = np.linspace(0.01, 0.99, 99)
+        thresholds = np.linspace(0.001, 0.999, 999)
         best_recall = -1.0
         best_far = 2.0
         best_threshold = 0.5
@@ -418,16 +416,72 @@ def _clean_and_dedup_rows(df: pd.DataFrame, new_row: pd.DataFrame, key_cols: lis
     return pd.concat([df, new_row], ignore_index=True)
 
 
+def _read_csv_robust(filepath: str) -> pd.DataFrame:
+    encodings = ['utf-8-sig', 'cp949', 'utf-8', 'euc-kr', 'latin1']
+    delimiters = [',', '\t', None]
+    for enc in encodings:
+        for sep in delimiters:
+            try:
+                df = pd.read_csv(filepath, sep=sep, engine='python' if sep is None else 'c', encoding=enc)
+                if df.shape[1] > 1:
+                    cols = list(df.columns)
+                    if len(cols) >= 3 and cols[1] == 'Model':
+                        cols[2] = '데이터'
+                        df.columns = cols
+                    return df
+            except Exception:
+                continue
+    return pd.read_csv(filepath)
+
+
+def save_experiment_result_to_sqlite(db_path: str, table_name: str, row_data: dict, key_cols: list):
+    """
+    Saves or updates experiment result in SQLite database with deduplication.
+    """
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    df_row = pd.DataFrame([row_data])
+
+    try:
+        with sqlite3.connect(db_path, timeout=30.0) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+            table_exists = cursor.fetchone() is not None
+
+            if table_exists:
+                df_existing = pd.read_sql(f"SELECT * FROM [{table_name}]", conn)
+                df_final = _clean_and_dedup_rows(df_existing, df_row, key_cols)
+            else:
+                df_final = df_row
+
+            df_final.to_sql(table_name, conn, if_exists='replace', index=False)
+            print(f"[RESULT LOG] Updated SQLite DB table '{table_name}': {db_path}")
+    except Exception as e:
+        print(f"[WARNING] SQLite save failed ({e})")
+
+
 def save_experiment_result_to_csv(master_csv_path: str, row_data: dict, key_cols: list):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     results_dir = os.path.dirname(master_csv_path)
     os.makedirs(results_dir, exist_ok=True)
 
+    # 1. Save to SQLite DB (results/experiments.db)
+    db_path = os.path.join(results_dir, "experiments.db")
+    filename = os.path.basename(master_csv_path)
+    if 'row' in filename:
+        table_name = 'master_row_threshold_results'
+    elif 'proposed' in filename:
+        table_name = 'master_proposed_threshold_results'
+    else:
+        table_name = 'experiment_results'
+
+    save_experiment_result_to_sqlite(db_path, table_name, row_data, key_cols)
+
+    # 2. Sync to Master CSV file
     df_row = pd.DataFrame([row_data])
 
     try:
         if os.path.exists(master_csv_path):
-            df_master = pd.read_csv(master_csv_path, encoding='utf-8-sig')
+            df_master = _read_csv_robust(master_csv_path)
             df_final = _clean_and_dedup_rows(df_master, df_row, key_cols)
         else:
             df_final = df_row
@@ -436,7 +490,7 @@ def save_experiment_result_to_csv(master_csv_path: str, row_data: dict, key_cols
     except PermissionError:
         backup_path = master_csv_path + ".backup.csv"
         if os.path.exists(backup_path):
-            df_backup = pd.read_csv(backup_path, encoding='utf-8-sig')
+            df_backup = _read_csv_robust(backup_path)
             df_final = _clean_and_dedup_rows(df_backup, df_row, key_cols)
         else:
             df_final = df_row

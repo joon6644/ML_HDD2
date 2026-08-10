@@ -8,8 +8,10 @@ import seaborn as sns
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ANALYSIS_DIR = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
+REPORTS_DIR = os.path.join(RESULTS_DIR, "reports")
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
+os.makedirs(REPORTS_DIR, exist_ok=True)
 
 HDD_NAME = "HGST_20HUH721212ALN604"
 MODELS = [
@@ -27,33 +29,54 @@ STYLE_CONFIG = {
 }
 
 
+def find_report_csv(model_code: str) -> str:
+    for d in [REPORTS_DIR, RESULTS_DIR, ANALYSIS_DIR]:
+        path = os.path.join(d, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
+        if os.path.exists(path):
+            return path
+    return None
+
+
 def load_operational_false_alarm_data(model_code: str) -> np.ndarray:
-    """
-    Operational False Alarm Definition (User Specified):
-    Includes ALL HDDs where a False Alarm occurred from an operational perspective:
-      1) Healthy HDDs (has_failed == 0) that triggered an alarm.
-      2) Failed HDDs (has_failed == 1) that triggered an alarm OUTSIDE the 30-day target operational window (days_to_failure > 30).
-    Returns the array of days since observation start (first_alarm_date - first_seen_date).
-    """
-    csv_path = os.path.join(ANALYSIS_DIR, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
-    if not os.path.exists(csv_path):
-        csv_path = os.path.join(RESULTS_DIR, f"seed42_alarm_report_{HDD_NAME}_{model_code}.csv")
+    csv_path = find_report_csv(model_code)
+    if not (csv_path and os.path.exists(csv_path)):
+        raise FileNotFoundError(
+            f"[STRICT ERROR] Missing required alarm report CSV for dataset='{HDD_NAME}', model='{model_code}'. "
+            f"Experiments must not proceed without valid inference report data."
+        )
+    df = pd.read_csv(csv_path)
+    # 1. Healthy HDD False Alarms
+    healthy_fa = df[(df['has_failed'] == 0) & (df['alarm_triggered'] == 1)]
+    # 2. Failed HDD False Alarms (outside 30-day operational warning window)
+    failed_early_fa = df[(df['has_failed'] == 1) & (df['alarm_triggered'] == 1) & (df['days_to_failure_at_alarm'] > 30)]
     
-    if os.path.exists(csv_path):
-        df = pd.read_csv(csv_path)
-        # 1. Healthy HDD False Alarms
-        healthy_fa = df[(df['has_failed'] == 0) & (df['alarm_triggered'] == 1)]
-        # 2. Failed HDD False Alarms (outside 30-day operational warning window)
-        failed_early_fa = df[(df['has_failed'] == 1) & (df['alarm_triggered'] == 1) & (df['days_to_failure_at_alarm'] > 30)]
-        
-        combined_fa = pd.concat([healthy_fa, failed_early_fa], ignore_index=True)
-        days_since = combined_fa['days_since_observed'].dropna().values
-        return days_since[days_since >= 0]
-    else:
-        raise FileNotFoundError(f"Alarm report file missing for {model_code} at {csv_path}")
+    combined_fa = pd.concat([healthy_fa, failed_early_fa], ignore_index=True)
+    days_since = combined_fa['days_since_observed'].dropna().values
+    return days_since[days_since >= 0]
+
+
+def ensure_alarm_reports():
+    missing = False
+    for m_code, _ in MODELS:
+        if find_report_csv(m_code) is None:
+            missing = True
+            break
+    if missing:
+        script_path = os.path.join(ANALYSIS_DIR, "run_alarm_timing_seed42_analysis.py")
+        if not os.path.exists(script_path):
+            raise FileNotFoundError(f"[STRICT ERROR] Generator script missing: {script_path}")
+        print("\n[AUTO-GENERATE] Required alarm report CSVs missing. Triggering run_alarm_timing_seed42_analysis.py...")
+        import subprocess
+        res = subprocess.run([sys.executable, script_path], check=False)
+        if res.returncode != 0:
+            raise RuntimeError(
+                f"[STRICT ERROR] Automatic report generation failed (exit code {res.returncode}). "
+                f"Cannot generate visualization without complete model checkpoints and data."
+            )
 
 
 def main():
+    ensure_alarm_reports()
     plt.rcParams['font.sans-serif'] = ['Arial', 'Helvetica', 'DejaVu Sans', 'Calibri', 'sans-serif']
     plt.rcParams['axes.edgecolor'] = '#111111'
     plt.rcParams['axes.linewidth'] = 1.1

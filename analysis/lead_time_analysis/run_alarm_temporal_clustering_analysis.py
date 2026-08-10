@@ -45,37 +45,46 @@ STYLE_CONFIG = {
 
 
 def load_threshold_map() -> dict:
-    threshold_map = DEFAULT_THRESHOLDS.copy()
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_experiment_results.csv")
+    threshold_map = {}
+    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
     if os.path.exists(master_csv):
         try:
             df = pd.read_csv(master_csv, encoding='utf-8-sig')
             for _, row in df.iterrows():
                 hdd = str(row['데이터']).strip()
                 model_name = str(row['Model']).upper()
-                thresh = float(row['Threshold'])
+                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in row else 'Threshold'
+                thresh = float(row[thresh_col])
                 threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Loaded thresholds from master CSV -> {master_csv}")
+            print(f"[Threshold Loader] Loaded Proposed-Opt thresholds from CSV -> {master_csv}")
         except Exception as e:
-            print(f"[Threshold Loader] Warning: Could not read master CSV ({e}). Using defaults.")
+            print(f"[Threshold Loader] Error loading master CSV: {e}")
     return threshold_map
 
 
 def extract_all_alarm_events(hdd_name: str, model_name: str, threshold: float):
     hdd_path = os.path.join(PROJECT_ROOT, "data", "splitted", hdd_name)
     model_upper = model_name.upper()
+    lookup_key = "LGBM" if model_name.lower() == "lgbm" else ("XGB" if model_name.lower() == "xgb" else model_name.upper())
 
-    print(f"\n[Processing] Model: {model_upper} | Threshold: {threshold:.4f}")
+    # Fast Path: Check if cached alarm events CSV exists (0.01s load time)
+    reports_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis", "reports")
+    events_csv = os.path.join(reports_dir, f"seed42_alarm_events_{hdd_name}_{lookup_key}.csv")
+    summary_csv = os.path.join(reports_dir, f"seed42_alarm_hdd_summary_{hdd_name}_{lookup_key}.csv")
+    if os.path.exists(events_csv) and os.path.exists(summary_csv):
+        print(f"[CACHE HIT] Instant load from CSV -> {events_csv}")
+        return pd.read_csv(events_csv), pd.read_csv(summary_csv)
+
+    print(f"\n[Processing] Running inference for Model: {model_upper} | Threshold: {threshold:.4f}")
 
     train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name.lower())
 
     is_sequence_model = (model_name.lower() in ['lstm', 'gru'])
     ckpt_window_size = config.WINDOW_SIZE if is_sequence_model else None
-    ckpt_tag = "cw0_focal0"
 
     model = load_checkpoint(
         model_name.lower(), "none", config.SEED, config.TARGET_LEAD_TIME, hdd_path,
-        input_dim=len(features), extra_tag=ckpt_tag, features=features, window_size=ckpt_window_size
+        input_dim=len(features), features=features, window_size=ckpt_window_size
     )
 
     if model is None:
@@ -94,30 +103,47 @@ def extract_all_alarm_events(hdd_name: str, model_name: str, threshold: float):
 
     raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
 
-    alarm_events = []
-    total_failed = 0
+    event_records = []
+    hdd_summary_records = []
 
     for disk in raw_preds:
-        if not disk['has_failed']:
-            continue
-        total_failed += 1
         serial = disk['serial_number']
+        has_failed = disk['has_failed']
         failure_date = disk['failure_date']
         dates = disk['dates']
         preds = disk['preds']
 
-        alarm_indices = np.where(preds >= threshold)[0]
-        for idx in alarm_indices:
-            alarm_date = pd.to_datetime(dates[idx])
-            days_to_failure = (failure_date - alarm_date).days
-            if days_to_failure >= 0:
-                alarm_events.append({
+        alarm_mask = (preds >= threshold)
+        alarm_indices = np.where(alarm_mask)[0]
+        total_alarms = len(alarm_indices)
+
+        if total_alarms > 0:
+            first_alarm_idx = alarm_indices[0]
+            first_alarm_date = pd.to_datetime(dates[first_alarm_idx])
+
+            if has_failed and (failure_date is not None):
+                days_to_failure = (failure_date - first_alarm_date).days
+            else:
+                days_to_failure = None
+
+            diffs = np.diff(alarm_indices)
+            bursts = np.split(alarm_indices, np.where(diffs > 1)[0] + 1)
+            num_bursts = len(bursts)
+            burst_lengths = [len(b) for b in bursts]
+            mean_burst_len = float(np.mean(burst_lengths))
+            max_burst_len = int(np.max(burst_lengths))
+
+            if num_bursts > 1:
+                gaps_between_bursts = [bursts[i][0] - bursts[i-1][-1] for i in range(1, num_bursts)]
+                mean_burst_gap = float(np.mean(gaps_between_bursts))
+            else:
+                mean_burst_gap = 0.0
+
+            for idx in alarm_indices:
+                a_date = pd.to_datetime(dates[idx])
+                dtf = (failure_date - a_date).days if (has_failed and failure_date is not None) else None
+                event_records.append({
                     'serial_number': serial,
-                    'hdd': hdd_name,
-                    'model': model_upper,
-                    'threshold': threshold,
-                    'alarm_date': alarm_date,
-                    'failure_date': failure_date,
                     'days_to_failure': days_to_failure,
                     'alarm_score': float(preds[idx])
                 })
