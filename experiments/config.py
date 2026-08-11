@@ -38,8 +38,9 @@ SAVE_EXPERIMENT_ARTIFACTS = False
 # 12. GPU 가속 사용 여부 (XGBoost/LightGBM 공통 적용, GPU 미지원/실패 시 자동 CPU 폴백)
 USE_GPU = True
 
-# 13. 임곗값 탐색 제약 조건 (FAR 1% 제약 하에서 Recall 최대화)
+# 13. 임곗값 탐색 제약 조건 (EAP 1% 제약 하에서 ODR 최대화)
 MAX_FAR = 0.01
+MAX_EAP = 0.01
 
 # 14. 모델 가중치(체크포인트) 저장 여부
 SAVE_MODEL_WEIGHTS = True

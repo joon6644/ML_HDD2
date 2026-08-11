@@ -23,10 +23,10 @@ MODELS = [
 ]
 
 MODEL_COLORS = {
-    "LGBM": {"fill": "#2b5c8f", "edge": "#000000"},
-    "XGB":  {"fill": "#d95f02", "edge": "#000000"},
-    "LSTM": {"fill": "#7570b3", "edge": "#000000"},
-    "GRU":  {"fill": "#1b9e77", "edge": "#000000"}
+    "LGBM": {"dot": "#2b5c8f", "edge": "#000000"},
+    "XGB":  {"dot": "#d95f02", "edge": "#000000"},
+    "LSTM": {"dot": "#7570b3", "edge": "#000000"},
+    "GRU":  {"dot": "#1b9e77", "edge": "#000000"}
 }
 
 
@@ -49,10 +49,10 @@ def main():
     plt.rcParams['axes.linewidth'] = 1.1
 
     sns.set_theme(style="ticks", palette="muted")
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8), dpi=300, sharey=True)
     
     fig.suptitle(
-        "Operational False Alarm Timing Distribution — HGST (20HUH721212ALN604)",
+        "Operational False Alarm Event Timeline Scatter Plot — HGST (20HUH721212ALN604)",
         fontsize=15, fontweight="bold", y=0.98, color="#111111"
     )
 
@@ -64,7 +64,8 @@ def main():
         model_data[m_code] = load_operational_false_alarm_data(m_code)
 
     max_days = 2600
-    bins = np.linspace(0, max_days, 36)
+
+    np.random.seed(42) # Reproducible vertical jitter
 
     for idx, (m_code, m_title) in enumerate(MODELS):
         r, c = positions[idx]
@@ -74,14 +75,25 @@ def main():
         style = MODEL_COLORS[m_code]
 
         if n_total > 0:
-            sns.histplot(
-                x=days,
-                bins=bins,
-                color=style["fill"],
+            # Deterministic/clean vertical jitter to prevent point overlap
+            y_jitter = np.linspace(0.2, 0.8, n_total) if n_total > 1 else np.array([0.5])
+            
+            # Scatter points
+            ax.scatter(
+                days, y_jitter,
+                color=style["dot"],
                 edgecolor=style["edge"],
-                alpha=0.75,
-                linewidth=0.8,
-                ax=ax
+                s=80,
+                alpha=0.85,
+                linewidth=1.0,
+                zorder=4,
+                label=f"False Alarm Event (n = {n_total})"
+            )
+
+            # Rug plot tick lines along bottom
+            ax.vlines(
+                days, ymin=0.0, ymax=0.15,
+                colors=style["dot"], linewidth=1.2, alpha=0.6, zorder=3
             )
 
         ax.set_title(
@@ -91,34 +103,38 @@ def main():
 
         ax.set_xlabel("Days Since Observation Start (Days)", fontsize=11, fontweight="bold", labelpad=6)
         if c == 0:
-            ax.set_ylabel("False Alarm Count", fontsize=11, fontweight="bold", labelpad=6)
+            ax.set_ylabel("Event Distribution", fontsize=11, fontweight="bold", labelpad=6)
         else:
             ax.set_ylabel("")
 
         ax.set_xlim(0, max_days)
+        ax.set_ylim(0, 1.0)
+        ax.set_yticks([]) # Hide arbitrary Y ticks
+
         ax.set_xticks(np.arange(0, max_days + 1, 500))
 
         ax.label_outer()
         ax.set_xlabel("Days Since Observation Start (Days)", fontsize=11, fontweight="bold", labelpad=6)
 
-        ax.grid(True, axis="y", linestyle=":", alpha=0.20, color="#666666")
-        ax.grid(False, axis="x")
-        sns.despine(ax=ax, top=True, right=True)
+        ax.grid(True, axis="x", linestyle=":", alpha=0.30, color="#888888")
+        ax.axhline(0.15, color="#cccccc", linestyle="-", linewidth=0.8, zorder=1)
+
+        sns.despine(ax=ax, top=True, right=True, left=True)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
 
-    out_path = os.path.join(RESULTS_DIR, "seed42_healthy_hdd_false_alarm_timing_grid.png")
-    out_path_alt = os.path.join(RESULTS_DIR, "seed42_operational_false_alarm_timing_grid.png")
+    out_path = os.path.join(RESULTS_DIR, "seed42_false_alarm_dot_plot_grid.png")
+    out_path_alt = os.path.join(RESULTS_DIR, "HGST_20HUH721212ALN604_false_alarm_dots_2x2.png")
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     plt.savefig(out_path_alt, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("=" * 80)
-    print(" [SUCCESS] Operational False Alarm Timing Grid (Unified Color) Generated!")
-    print(f"  - LightGBM: Total FA = {len(model_data['LGBM'])}")
-    print(f"  - XGBoost : Total FA = {len(model_data['XGB'])}")
-    print(f"  - LSTM    : Total FA = {len(model_data['LSTM'])}")
-    print(f"  - GRU     : Total FA = {len(model_data['GRU'])}")
+    print(" [SUCCESS] Operational False Alarm Dot Plot (Scatter Timeline) Generated!")
+    print(f"  - LightGBM: n = {len(model_data['LGBM'])}")
+    print(f"  - XGBoost : n = {len(model_data['XGB'])}")
+    print(f"  - LSTM    : n = {len(model_data['LSTM'])}")
+    print(f"  - GRU     : n = {len(model_data['GRU'])}")
     print(f" Saved to: {out_path}")
     print("=" * 80)
 

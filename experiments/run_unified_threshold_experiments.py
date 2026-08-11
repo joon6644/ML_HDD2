@@ -32,6 +32,8 @@ _DATASET_CACHE = {}
 def get_cached_dataset(data_path: str, drop_failure_day: bool, model: str):
     cache_key = (data_path, drop_failure_day, model)
     if cache_key not in _DATASET_CACHE:
+        _DATASET_CACHE.clear()
+        gc.collect()
         print(f"\n[Data Loader Cache] Loading dataset into RAM: {data_path}...")
         train_df, val_df, test_df, features = load_dataset(data_path, drop_failure_day_in_train=drop_failure_day, model=model)
         _DATASET_CACHE[cache_key] = (train_df, val_df, test_df, features)
@@ -80,17 +82,20 @@ def is_experiment_already_completed(results_dir: str, model_name: str, dataset_n
     return False
 
 
-def reset_master_results(results_dir: str):
+def reset_master_results(results_dir: str, reset_row: bool = False):
     """
-    Resets/removes existing master CSV result files so new experiments accumulate from scratch.
+    Resets/removes existing master CSV result files and SQLite tables for fresh accumulation.
     """
-    row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
     proposed_csv = os.path.join(results_dir, "master_proposed_threshold_results.csv")
+    row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
+    db_path = os.path.join(results_dir, "experiments.db")
 
     targets = [
-        row_csv, proposed_csv,
-        row_csv + ".backup.csv", proposed_csv + ".backup.csv"
+        proposed_csv, proposed_csv + ".backup.csv",
+        os.path.join(results_dir, "master_proposed_threshold_results.xlsx")
     ]
+    if reset_row:
+        targets.extend([row_csv, row_csv + ".backup.csv", os.path.join(results_dir, "master_row_threshold_results.xlsx")])
 
     print("\n" + "=" * 80)
     print(" [RESET MEMORY] Cleaning up existing master result files for fresh accumulation")
@@ -101,6 +106,18 @@ def reset_master_results(results_dir: str):
                 print(f"  -> Removed existing file: {path}")
             except Exception as e:
                 print(f"  -> Warning: Could not remove {path} ({e})")
+
+    if os.path.exists(db_path):
+        try:
+            with sqlite3.connect(db_path, timeout=10.0) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DROP TABLE IF EXISTS master_proposed_threshold_results")
+                if reset_row:
+                    cursor.execute("DROP TABLE IF EXISTS master_row_threshold_results")
+                conn.commit()
+                print(f"  -> Dropped SQLite table(s) from {db_path}")
+        except Exception as e:
+            print(f"  -> Warning: Could not drop SQLite table ({e})")
     print("=" * 80 + "\n")
 
 
@@ -112,7 +129,10 @@ def run_unified_threshold_experiments():
     parser.add_argument('--imbalance', type=str, default='none', help='Imbalance strategy')
     parser.add_argument('--drop-failure-day', action='store_true', default=config.DROP_FAILURE_DAY_IN_TRAIN, help='Drop failure day in train')
     parser.add_argument('--reset', action='store_true', default=False, help='Reset/clear existing master CSV result files before running')
+    parser.add_argument('--reset-row', action='store_true', default=False, help='Also reset row threshold result files/tables')
     parser.add_argument('--dry-run', action='store_true', help='Print planned tasks without execution')
+    parser.add_argument('--eval-only', '--inference-only', action='store_true', default=False, help='Run inference and threshold evaluation only using pre-saved model checkpoints (do not retrain and do not skip existing results)')
+    parser.add_argument('--overwrite', '--force-eval', action='store_true', default=False, help='Force re-evaluation and overwrite existing results for specified dataset/model/seed without running full reset')
     args = parser.parse_args()
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -133,7 +153,7 @@ def run_unified_threshold_experiments():
 
     # Reset existing memory/files ONLY if explicitly requested via --reset flag
     if args.reset and not args.dry_run:
-        reset_master_results(results_dir)
+        reset_master_results(results_dir, reset_row=args.reset_row)
 
     # 1. Build planned task list (Loop Order: DATASET -> MODEL -> SEED for RAM caching & minimal I/O)
     tasks = []
@@ -157,6 +177,7 @@ def run_unified_threshold_experiments():
     print(f" Datasets ({len(args.datasets)}) : {args.datasets}")
     print(f" Models ({len(args.models)})   : {args.models}")
     print(f" Seeds ({len(args.seeds)})    : {args.seeds}")
+    print(f" Eval Only / Overwrite: eval_only={args.eval_only}, overwrite={args.overwrite}")
     print(f" Total Planned Runs  : {len(tasks)}")
     print(f" Output Master CSV 1 : {master_row_csv_path}")
     print(f" Output Master CSV 2 : {master_proposed_csv_path}")
@@ -188,8 +209,9 @@ def run_unified_threshold_experiments():
             seed = t['seed']
             imbalance = args.imbalance
 
-            # Skip if task is already completed and saved in results
-            if not args.reset and is_experiment_already_completed(results_dir, model_name, ds, seed):
+            # Skip if task is already completed and saved in results (unless reset/eval_only/overwrite)
+            skip_completed = not (args.reset or args.eval_only or args.overwrite)
+            if skip_completed and is_experiment_already_completed(results_dir, model_name, ds, seed):
                 print(f"[SKIP] DATA={ds} | MODEL={model_name.upper()} | SEED={seed} already completed in results. Skipping inference.")
                 successful_runs += 1
                 continue
@@ -206,6 +228,11 @@ def run_unified_threshold_experiments():
 
                 # B. Checkpoint reload or model training
                 cached_model = load_checkpoint(model_name, imbalance, seed, config.TARGET_LEAD_TIME, data_path, input_dim=len(features), features=features, window_size=window_size if is_sequence_model else None)
+
+                if cached_model is None and args.eval_only:
+                    print(f"[ERROR] No saved checkpoint found for DATA={ds} | MODEL={model_name.upper()} | SEED={seed}. Skipping (Eval-Only Mode).")
+                    failed_runs += 1
+                    continue
 
                 if cached_model is None:
                     if is_sequence_model:
@@ -284,14 +311,17 @@ def run_unified_threshold_experiments():
                     'Proposed Disk Recall': round(proposed_at_th_row['recall'], 4),
                     'Proposed Disk F1': round(proposed_at_th_row['f1'], 4),
                     'Proposed Disk FAR (%)': round(proposed_at_th_row['far'] * 100, 2),
+                    'Proposed OAP': round(proposed_at_th_row['oap'], 4),
+                    'Proposed ODR': round(proposed_at_th_row['odr'], 4),
+                    'Proposed EAP (%)': round(proposed_at_th_row['eap'] * 100, 2),
                     'Proposed Median LT': round(proposed_at_th_row['median_lead_time'], 2),
                     'Proposed EDR@15': round(proposed_at_th_row['edr_15'], 4)
                 }
                 save_experiment_result_to_csv(master_row_csv_path, row_result_data, key_cols)
 
-                # D2. Proposed Disk-Level Optimal Threshold Search & Evaluation
-                th_proposed, max_val_disk_rec = evaluator.find_best_threshold_proposed_level(raw_preds_val, max_far=config.MAX_FAR)
-                print(f"[Proposed Disk Search] Best Threshold: {th_proposed:.4f} (Max Val Disk Recall @ FAR <= 1%: {max_val_disk_rec:.4%})")
+                # D2. Proposed Disk-Level Optimal Threshold Search & Evaluation (Max ODR @ EAP <= 1%)
+                th_proposed, max_val_odr = evaluator.find_best_threshold_proposed_level(raw_preds_val, max_eap=config.MAX_EAP)
+                print(f"[Proposed Disk Search] Best Threshold: {th_proposed:.4f} (Max Val ODR @ EAP <= 1%: {max_val_odr:.4%})")
 
                 proposed_at_th_proposed, _ = evaluator.evaluate_proposed_level(raw_preds_test, threshold=th_proposed)
 
@@ -301,6 +331,14 @@ def run_unified_threshold_experiments():
                     '데이터': os.path.basename(ds),
                     'Seed': seed,
                     'Threshold (Proposed-Opt)': round(th_proposed, 4),
+                    'OAP': round(proposed_at_th_proposed['oap'], 4),
+                    'ODR': round(proposed_at_th_proposed['odr'], 4),
+                    'EAP (%)': round(proposed_at_th_proposed['eap'] * 100, 2),
+                    'N_On_time': proposed_at_th_proposed['N_ontime'],
+                    'N_Early': proposed_at_th_proposed['N_early'],
+                    'N_Missed': proposed_at_th_proposed['N_missed'],
+                    'N_Censored_Early': proposed_at_th_proposed['N_cens_early'],
+                    'N_Censored_No_Alarm': proposed_at_th_proposed['N_cens_no_alarm'],
                     'Disk Precision': round(proposed_at_th_proposed['precision'], 4),
                     'Disk Recall': round(proposed_at_th_proposed['recall'], 4),
                     'Disk F1': round(proposed_at_th_proposed['f1'], 4),

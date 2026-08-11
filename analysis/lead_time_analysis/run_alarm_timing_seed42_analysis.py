@@ -111,6 +111,11 @@ def evaluate_one(dataset: str, model_name: str, threshold: float = None):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Operational False Alarm Timing Analysis")
+    parser.add_argument("--overwrite", action="store_true", default=True, help="Overwrite cached alarm reports with new threshold evaluation")
+    args = parser.parse_args()
+
     analysis_dir = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     reports_dir = os.path.join(results_dir, "reports")
@@ -129,21 +134,15 @@ def main():
         thresh = threshold_map.get((HDD_NAME, model_name.upper()))
         
         fname = f"seed42_alarm_report_{HDD_NAME}_{model_name.upper()}.csv"
-        csv_path = None
-        for d in [reports_dir, results_dir, analysis_dir]:
-            p = os.path.join(d, fname)
-            if os.path.exists(p):
-                csv_path = p
-                break
+        csv_path = os.path.join(reports_dir, fname)
 
-        if csv_path and os.path.exists(csv_path):
+        if not args.overwrite and os.path.exists(csv_path):
             report_df = pd.read_csv(csv_path)
         else:
-            print(f"[Evaluating] {HDD_NAME} | {model_name.upper()} | threshold={thresh}")
+            print(f"[Evaluating with New Threshold] {HDD_NAME} | {model_name.upper()} | threshold={thresh}")
             report_df = evaluate_one(HDD_NAME, model_name, thresh)
             if report_df is None:
                 continue
-            csv_path = os.path.join(reports_dir, fname)
             report_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
             
         # User defined operational false alarms:

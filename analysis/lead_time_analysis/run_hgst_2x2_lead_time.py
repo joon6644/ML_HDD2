@@ -4,14 +4,28 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
 ANALYSIS_DIR = os.path.join(PROJECT_ROOT, "analysis", "lead_time_analysis")
+EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 os.makedirs(RESULTS_DIR, exist_ok=True)
 os.makedirs(ANALYSIS_DIR, exist_ok=True)
 
+if ANALYSIS_DIR not in sys.path:
+    sys.path.insert(0, ANALYSIS_DIR)
+if EXPERIMENTS_DIR not in sys.path:
+    sys.path.insert(0, EXPERIMENTS_DIR)
+
+from analysis_data_loader import get_proposed_threshold
+from data_loader import load_dataset
+from checkpoint_utils import load_checkpoint
+from evaluator import RollingEvaluator
+import config
+
 HDD_NAME = "HGST_20HUH721212ALN604"
+SEED = 42
 
 MODELS = [
     ("LGBM", "LightGBM"),
@@ -28,25 +42,43 @@ STYLE_CONFIG = {
 }
 
 
-def load_lead_time_records(hdd_name: str, model_code: str) -> np.ndarray:
-    filename = f"lead_time_{hdd_name}_{model_code}_all_alarms.csv"
-    results_path = os.path.join(RESULTS_DIR, filename)
-    analysis_path = os.path.join(ANALYSIS_DIR, filename)
-    
-    if os.path.exists(results_path):
-        df = pd.read_csv(results_path)
-        return df['lead_time_days'].values
-    elif os.path.exists(analysis_path):
-        df = pd.read_csv(analysis_path)
-        return df['lead_time_days'].values
-    else:
-        alt_path = os.path.join(ANALYSIS_DIR, f"seed42_alarm_report_{hdd_name}_{model_code}.csv")
-        if os.path.exists(alt_path):
-            df = pd.read_csv(alt_path)
-            hits = df[(df['has_failed'] == 1) & (df['is_hit'] == 1)]
-            return hits['days_to_failure_at_alarm'].dropna().values
-        else:
-            raise FileNotFoundError(f"Lead time record file missing for {model_code}")
+def load_all_alarm_lead_times(model_code: str) -> np.ndarray:
+    """
+    Computes lead times for ALL daily alarms triggered on failed HDDs.
+    If an HDD alarms on multiple days before failure, every daily alarm contributes a lead time value.
+    """
+    m_lower = model_code.lower()
+    thr = get_proposed_threshold(HDD_NAME, m_lower, seed=SEED)
+    data_path = os.path.join(PROJECT_ROOT, "data", "splitted", HDD_NAME)
+    is_seq = m_lower in ['lstm', 'gru']
+    w_size = config.WINDOW_SIZE if is_seq else 1
+
+    _, _, test_df, features = load_dataset(data_path, model=m_lower)
+    model = load_checkpoint(
+        m_lower, "none", SEED, config.TARGET_LEAD_TIME, data_path,
+        input_dim=len(features), features=features,
+        window_size=w_size if is_seq else None
+    )
+    m_type = 'pytorch_class' if is_seq else m_lower
+    evaluator = RollingEvaluator(
+        model, features, window_size=w_size,
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        model_type=m_type, seed=SEED
+    )
+    raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
+
+    all_lead_times = []
+    for d in raw_preds:
+        probs = np.array(d['preds'])
+        dates = pd.to_datetime(d['dates'])
+        alarm_mask = probs >= thr
+        if d['has_failed'] and d['failure_date'] is not None:
+            fail_date = pd.to_datetime(d['failure_date'])
+            alarm_dates = dates[alarm_mask]
+            lts = (fail_date - alarm_dates).days.values
+            all_lead_times.extend(lts)
+
+    return np.array(all_lead_times)
 
 
 def main():
@@ -56,19 +88,19 @@ def main():
 
     sns.set_theme(style="ticks", palette="muted")
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), dpi=300, sharey=True)
-    fig.suptitle("First-Alarm Lead Time Distribution — HGST (20HUH721212ALN604)", fontsize=16, fontweight="bold", y=0.98, color="#111111")
+    fig.suptitle("All-Alarms Lead Time Distribution — HGST (20HUH721212ALN604)", fontsize=16, fontweight="bold", y=0.98, color="#111111")
 
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
     tags = ["(a)", "(b)", "(c)", "(d)"]
-    bins = np.linspace(0, 180, 36)
+    bins = np.linspace(0, 180, 37)
 
     model_data = {}
     max_density = 0.0
 
     for m_code, _ in MODELS:
-        lead_times_full = load_lead_time_records(HDD_NAME, m_code)
+        lead_times_full = load_all_alarm_lead_times(m_code)
         lead_times_disp = lead_times_full[lead_times_full <= 180]
-        true_median = float(np.median(lead_times_full))
+        true_median = float(np.median(lead_times_full)) if len(lead_times_full) > 0 else 0.0
         
         counts, _ = np.histogram(lead_times_disp, bins=bins, density=True)
         if len(counts) > 0 and counts.max() > max_density:
@@ -88,16 +120,17 @@ def main():
         lead_times_display = data["disp"]
         true_median_lt = data["median"]
 
-        ax.hist(
-            lead_times_display,
-            bins=bins,
-            density=True,
-            facecolor=style["fill"],
-            edgecolor=style["edge"],
-            alpha=0.72,
-            linewidth=0.9,
-            label="Density Hist"
-        )
+        if len(lead_times_display) > 0:
+            ax.hist(
+                lead_times_display,
+                bins=bins,
+                density=True,
+                facecolor=style["fill"],
+                edgecolor=style["edge"],
+                alpha=0.72,
+                linewidth=0.9,
+                label="Density Hist"
+            )
 
         ax.axvline(
             true_median_lt,
@@ -141,12 +174,15 @@ def main():
     plt.tight_layout(rect=[0, 0, 1, 0.96])
 
     out_img1 = os.path.join(RESULTS_DIR, "HGST_20HUH721212ALN604_4models_2x2_lead_time.png")
-    
     plt.savefig(out_img1, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("\n" + "=" * 80)
-    print(" [SUCCESS] Updated 2x2 Lead Time Plot Saved with Deduplicated Y-Axis!")
+    print(" [SUCCESS] All-Alarms Lead Time Plot Generated!")
+    print(f"  - LightGBM: n = {len(model_data['LGBM']['full'])}")
+    print(f"  - XGBoost : n = {len(model_data['XGB']['full'])}")
+    print(f"  - LSTM    : n = {len(model_data['LSTM']['full'])}")
+    print(f"  - GRU     : n = {len(model_data['GRU']['full'])}")
     print(f" Saved to:\n  -> {out_img1}")
     print("=" * 80 + "\n")
 

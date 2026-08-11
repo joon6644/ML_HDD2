@@ -30,10 +30,10 @@ from evaluator import RollingEvaluator
 config.PIPELINE_VERSION = "v2"
 
 DEFAULT_THRESHOLDS = {
-    ("HGST_20HUH721212ALN604", "LGBM"): 0.99,
-    ("HGST_20HUH721212ALN604", "XGB"): 0.46,
-    ("HGST_20HUH721212ALN604", "LSTM"): 0.11,
-    ("HGST_20HUH721212ALN604", "GRU"): 0.16,
+    ("HGST_20HUH721212ALN604", "LGBM"): 0.998,
+    ("HGST_20HUH721212ALN604", "XGB"): 0.478,
+    ("HGST_20HUH721212ALN604", "LSTM"): 0.327,
+    ("HGST_20HUH721212ALN604", "GRU"): 0.662,
 }
 
 MODEL_TITLES = {
@@ -59,19 +59,35 @@ def _read_master_csv(path: str) -> pd.DataFrame:
     raise ValueError(f"Could not parse master CSV: {path}")
 
 
-def load_threshold_map() -> dict:
+def load_threshold_map(seed: int = 42) -> dict:
     threshold_map = DEFAULT_THRESHOLDS.copy()
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-    if not os.path.exists(master_csv):
-        master_csv = os.path.join(PROJECT_ROOT, "results", "master_experiment_results.csv")
+    db_path = os.path.join(PROJECT_ROOT, "results", "experiments.db")
     
+    if os.path.exists(db_path):
+        try:
+            import sqlite3
+            with sqlite3.connect(db_path) as conn:
+                df = pd.read_sql("SELECT 데이터, Model, [Threshold (Proposed-Opt)] FROM master_proposed_threshold_results WHERE Seed=?", conn, params=(seed,))
+                for _, row in df.iterrows():
+                    hdd = str(row['데이터']).strip()
+                    model_name = str(row['Model']).upper()
+                    thresh = float(row['Threshold (Proposed-Opt)'])
+                    threshold_map[(hdd, model_name)] = thresh
+            print(f"[Threshold Loader] Successfully loaded Seed {seed} proposed thresholds from SQLite -> {db_path}")
+            return threshold_map
+        except Exception as e:
+            print(f"[Threshold Loader] Warning loading from SQLite ({e}). Trying CSV...")
+            
+    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
     if os.path.exists(master_csv):
         try:
             df = _read_master_csv(master_csv)
+            if 'Seed' in df.columns:
+                df = df[df['Seed'] == seed]
             for _, row in df.iterrows():
                 hdd = str(row['데이터']).strip()
                 model_name = str(row['Model']).upper()
-                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in row else 'Threshold'
+                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in df.columns else 'Threshold'
                 thresh = float(row[thresh_col])
                 threshold_map[(hdd, model_name)] = thresh
             print(f"[Threshold Loader] Loaded thresholds from CSV -> {master_csv}")
@@ -115,23 +131,47 @@ def load_checkpoint_flexible(model_name: str, seed: int, lead_time: int, dataset
     return None
 
 
-def select_best_quadrant_samples(raw_preds, threshold: float):
-    tp_candidates = [d for d in raw_preds if d['has_failed'] and np.any(d['preds'] >= threshold)]
-    fn_candidates = [d for d in raw_preds if d['has_failed'] and not np.any(d['preds'] >= threshold)]
-    fp_candidates = [d for d in raw_preds if not d['has_failed'] and np.any(d['preds'] >= threshold)]
-    tn_candidates = [d for d in raw_preds if not d['has_failed'] and not np.any(d['preds'] >= threshold)]
+def select_best_operational_samples(raw_preds, threshold: float, lead_time: int = 30):
+    ontime_candidates = []
+    early_candidates = []
+    cens_early_candidates = []
+    missed_candidates = []
 
-    # Select representative samples
-    tp_sample = sorted(tp_candidates, key=lambda x: np.max(x['preds']), reverse=True)[0] if tp_candidates else None
-    fn_sample = sorted(fn_candidates, key=lambda x: np.max(x['preds']), reverse=True)[0] if fn_candidates else None
-    fp_sample = sorted(fp_candidates, key=lambda x: np.max(x['preds']), reverse=True)[0] if fp_candidates else None
-    tn_sample = tn_candidates[0] if tn_candidates else None
+    for disk in raw_preds:
+        has_failed = disk['has_failed']
+        failure_date = pd.to_datetime(disk['failure_date']) if (has_failed and disk['failure_date'] is not None) else None
+        dates = pd.to_datetime(disk['dates'])
+        preds = disk['preds']
+
+        alarm_mask = (preds >= threshold)
+        alarm_indices = np.where(alarm_mask)[0]
+
+        if len(alarm_indices) > 0:
+            first_alarm_idx = alarm_indices[0]
+            first_alarm_date = dates[first_alarm_idx]
+            if has_failed and failure_date is not None:
+                days_to_fail = (failure_date - first_alarm_date).days
+                if 0 <= days_to_fail <= lead_time:
+                    ontime_candidates.append((disk, days_to_fail, np.max(preds)))
+                elif days_to_fail > lead_time:
+                    early_candidates.append((disk, days_to_fail, np.max(preds)))
+            else:
+                cens_early_candidates.append((disk, None, np.max(preds)))
+        else:
+            if has_failed:
+                missed_candidates.append((disk, None, np.max(preds)))
+
+    # Select representative samples based on peak score & operational characteristics
+    ontime_sample = sorted(ontime_candidates, key=lambda x: x[2], reverse=True)[0][0] if ontime_candidates else None
+    early_sample = sorted(early_candidates, key=lambda x: x[2], reverse=True)[0][0] if early_candidates else None
+    cens_early_sample = sorted(cens_early_candidates, key=lambda x: x[2], reverse=True)[0][0] if cens_early_candidates else None
+    missed_sample = sorted(missed_candidates, key=lambda x: x[2], reverse=True)[0][0] if missed_candidates else None
 
     return {
-        'TP': tp_sample,
-        'FN': fn_sample,
-        'FP': fp_sample,
-        'TN': tn_sample
+        'On-time': ontime_sample,
+        'Early': early_sample,
+        'Censored Early': cens_early_sample,
+        'Missed': missed_sample
     }
 
 
@@ -146,25 +186,29 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
     fig, axes = plt.subplots(2, 2, figsize=(14, 9.2), dpi=300, sharey=True)
 
     fig.suptitle(
-        f"Operational Life-Cycle Timelines across 4 Confusion Matrix Quadrants — {m_title} ({hdd_name})",
+        f"Operational Life-Cycle Timelines across 4 Alarm Categories — {m_title} ({hdd_name})",
         fontsize=15, fontweight="bold", y=0.98, color="#111111"
     )
 
-    quadrants = [
-        ('TP', (0, 0), "(a) True Positive (TP)"),
-        ('FN', (0, 1), "(b) False Negative (FN)"),
-        ('FP', (1, 0), "(c) False Positive (FP)"),
-        ('TN', (1, 1), "(d) True Negative (TN)")
+    categories = [
+        ('On-time', (0, 0), "(a) On-time Alarm"),
+        ('Early', (0, 1), "(b) Early Alarm"),
+        ('Censored Early', (1, 0), "(c) Censored Early Alarm"),
+        ('Missed', (1, 1), "(d) Missed Failure")
     ]
 
     max_days_plot = 365
 
-    for key, (r, c), title in quadrants:
+    for key, (r, c), title in categories:
         ax = axes[r, c]
         disk_data = samples.get(key)
 
         if disk_data is None:
-            ax.text(0.5, 0.5, f"No sample found for {key}", ha='center', va='center')
+            ax.text(0.5, 0.5, f"No sample found for category: {key}", ha='center', va='center', fontsize=12)
+            ax.set_title(title, fontsize=12.5, fontweight='bold', pad=9, loc='left', color='#111111')
+            ax.set_ylim(-0.02, 1.05)
+            ax.set_ylabel("Prediction Probability" if c == 0 else "")
+            sns.despine(ax=ax, top=True, right=True)
             continue
 
         dates = pd.to_datetime(disk_data['dates'])
@@ -177,7 +221,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
             dates = dates[-max_days_plot:]
             preds = preds[-max_days_plot:]
 
-        # 1. Prediction Probability Curve P(t) with Standard Blue Line
+        # 1. Prediction Probability Curve P(t)
         ax.plot(
             dates, preds,
             color=STANDARD_LINE_COLOR, linewidth=1.8,
@@ -186,27 +230,35 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
 
         # 2. Shading above threshold for alarm regions
         alarm_mask = (preds >= threshold)
-        if np.any(alarm_mask):
+        alarm_indices = np.where(alarm_mask)[0]
+        if len(alarm_indices) > 0:
             ax.fill_between(
                 dates, threshold, preds,
                 where=(preds >= threshold),
                 color="#e41a1c", alpha=0.20, interpolate=True
             )
+            # Mark First Alarm Event
+            first_alarm_idx = alarm_indices[0]
+            first_alarm_date = dates[first_alarm_idx]
+            ax.axvline(
+                first_alarm_date, color="#e41a1c", linestyle=":", linewidth=1.5,
+                label=f"First Alarm Event ({first_alarm_date.strftime('%Y-%m-%d')})"
+            )
 
         # 3. Decision Threshold Line
         ax.axhline(
             threshold, color='#c00000', linestyle='--', linewidth=1.4,
-            label=f"Decision Threshold ({threshold:.2f})"
+            label=f"Decision Threshold ({threshold:.3f})"
         )
 
-        # 4. Actual Failure Event Line (For Failed Disks: TP & FN)
+        # 4. Actual Failure Event Line (For Failed Disks: On-time, Early, Missed)
         if has_failed and failure_date is not None:
             ax.axvline(
                 failure_date, color='#000000', linestyle='--', linewidth=1.5,
-                label="Actual Failure Event"
+                label=f"Actual Failure Event ({failure_date.strftime('%Y-%m-%d')})"
             )
 
-        # Subplot Title (Unified)
+        # Subplot Title
         ax.set_title(
             title,
             fontsize=12.5, fontweight='bold', pad=9, loc='left', color='#111111'
@@ -220,7 +272,6 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         ax.set_xticks(tick_dates)
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
 
-        # Ensure x-axis tick labels are displayed on ALL subplots, but NO "Observation Date" text
         ax.tick_params(axis='x', which='both', labelbottom=True, labelsize=9.5)
         ax.set_xlabel("")
 
@@ -234,7 +285,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         sns.despine(ax=ax, top=True, right=True)
 
         if r == 0 and c == 0:
-            ax.legend(fontsize=9.5, loc='upper left', frameon=True, facecolor='#ffffff', edgecolor='#cccccc', framealpha=0.90)
+            ax.legend(fontsize=9.0, loc='upper left', frameon=True, facecolor='#ffffff', edgecolor='#cccccc', framealpha=0.90)
 
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.subplots_adjust(hspace=0.28)
@@ -243,13 +294,13 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f"[SUCCESS] Saved updated 4-quadrant operational timeline image -> {output_paths[0]}")
+    print(f"[SUCCESS] Saved updated operational category timeline image -> {output_paths[0]}")
 
 
 def main():
     hdd_name = "HGST_20HUH721212ALN604"
     hdd_path = os.path.join(PROJECT_ROOT, "data", "splitted", hdd_name)
-    threshold_map = load_threshold_map()
+    threshold_map = load_threshold_map(seed=config.SEED)
 
     target_models = ["gru", "lgbm", "xgb", "lstm"]
 
@@ -257,7 +308,7 @@ def main():
     os.makedirs(results_dir, exist_ok=True)
 
     print("=" * 80)
-    print(f" UPDATING OPERATIONAL LIFE-CYCLE TIMELINES (4 QUADRANTS) ")
+    print(f" UPDATING OPERATIONAL LIFE-CYCLE TIMELINES (4 OPERATIONAL CATEGORIES) ")
     print("=" * 80)
 
     for m in target_models:
@@ -291,10 +342,10 @@ def main():
             seed=config.SEED
         )
 
-        print(f"\n[Inference & Plotting] Model: {model_upper} | Threshold: {thresh:.4f}")
+        print(f"\n[Inference & Plotting] Model: {model_upper} | Proposed Threshold: {thresh:.4f}")
         raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
 
-        samples = select_best_quadrant_samples(raw_preds, thresh)
+        samples = select_best_operational_samples(raw_preds, thresh, lead_time=config.TARGET_LEAD_TIME)
 
         out1 = os.path.join(results_dir, f"operational_timeline_4quadrants_{model_upper}.png")
         plot_operational_timelines(samples, m, thresh, hdd_name, [out1])
