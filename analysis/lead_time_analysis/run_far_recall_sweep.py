@@ -28,36 +28,15 @@ if ANALYSIS_DIR not in sys.path:
     sys.path.insert(0, ANALYSIS_DIR)
 
 import config
+from analysis_data_loader import load_threshold_map
 from run_threshold_leadtime_sweep import (
     DATASETS, MODELS, MANUFACTURER_MAP, get_raw_preds, sweep_thresholds
 )
 
 
-def _read_master_csv(path: str) -> pd.DataFrame:
-    """Robustly reads the master results CSV: normally utf-8-sig/comma, but can end
-    up as cp949/tab-delimited after being opened and re-saved in Excel."""
-    for encoding in ('utf-8-sig', 'cp949'):
-        for sep in (',', '\t'):
-            try:
-                df = pd.read_csv(path, encoding=encoding, sep=sep)
-                if df.shape[1] > 1:
-                    return df
-            except (UnicodeDecodeError, pd.errors.ParserError):
-                continue
-    raise ValueError(f"Could not parse master CSV with known encodings/separators: {path}")
-
-
 def load_operating_points(seed: int) -> dict:
-    """Reads (dataset, model) -> chosen threshold from master_proposed_threshold_results.csv."""
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-    op_map = {}
-    if not os.path.exists(master_csv):
-        return op_map
-    df = _read_master_csv(master_csv)
-    df = df[df['Seed'].astype(int) == seed]
-    for _, row in df.iterrows():
-        op_map[(str(row['데이터']).strip(), str(row['Model']).upper())] = float(row['Threshold (Proposed-Opt)'])
-    return op_map
+    """Reads (dataset, model) -> chosen threshold from the experiment DB (source of truth)."""
+    return load_threshold_map(seed=seed)
 
 
 def get_sweep_df(dataset: str, model_name: str, seed: int, step: float, results_dir: str) -> pd.DataFrame:

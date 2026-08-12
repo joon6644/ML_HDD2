@@ -21,7 +21,9 @@ from evaluator import (
     RollingEvaluator,
     find_best_threshold_row_level,
     calculate_row_level_metrics,
-    save_experiment_result_to_csv
+    save_experiment_result_to_csv,
+    read_results_table,
+    get_db_path
 )
 
 # ------------------------------------------------------------------------------
@@ -44,42 +46,31 @@ import sqlite3
 
 def is_experiment_already_completed(results_dir: str, model_name: str, dataset_name: str, seed: int) -> bool:
     """
-    Checks if an experiment (Model, 데이터, Seed) has already been computed and logged in SQLite/CSV.
+    Checks whether an experiment (Model, 데이터, Seed) is already recorded in the
+    authoritative SQLite DB. The master CSVs are a derived export and are never
+    consulted here -- one source of truth decides what has been run.
+
+    A missing DB/table means 'nothing recorded yet'; a malformed one propagates
+    rather than being silently treated as 'not completed' (which would quietly
+    retrain and overwrite results).
     """
-    db_path = os.path.join(results_dir, "experiments.db")
+    db_path = get_db_path(results_dir)
     model_norm = model_name.upper()
     ds_norm = os.path.basename(dataset_name)
 
-    # 1. Check SQLite DB
-    if os.path.exists(db_path):
-        try:
-            with sqlite3.connect(db_path, timeout=10.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM master_row_threshold_results WHERE UPPER(Model)=? AND 데이터=? AND Seed=?", (model_norm, ds_norm, seed))
-                c1 = cursor.fetchone()[0]
-                cursor.execute("SELECT COUNT(*) FROM master_proposed_threshold_results WHERE UPPER(Model)=? AND 데이터=? AND Seed=?", (model_norm, ds_norm, seed))
-                c2 = cursor.fetchone()[0]
-                if c1 > 0 and c2 > 0:
-                    return True
-        except Exception:
-            pass
+    for table in ('master_row_threshold_results', 'master_proposed_threshold_results'):
+        df = read_results_table(db_path, table)
+        if df.empty:
+            return False
+        match = (
+            (df['Model'].astype(str).str.upper() == model_norm)
+            & (df['데이터'].astype(str) == ds_norm)
+            & (df['Seed'].astype(int) == int(seed))
+        )
+        if not match.any():
+            return False
 
-    # 2. Check CSV files as fallback
-    row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
-    prop_csv = os.path.join(results_dir, "master_proposed_threshold_results.csv")
-    if os.path.exists(row_csv) and os.path.exists(prop_csv):
-        try:
-            from evaluator import _read_csv_robust
-            df1 = _read_csv_robust(row_csv)
-            df2 = _read_csv_robust(prop_csv)
-            m1 = (df1['Model'].astype(str).str.upper() == model_norm) & (df1['데이터'].astype(str) == ds_norm) & (df1['Seed'].astype(int) == int(seed))
-            m2 = (df2['Model'].astype(str).str.upper() == model_norm) & (df2['데이터'].astype(str) == ds_norm) & (df2['Seed'].astype(int) == int(seed))
-            if m1.any() and m2.any():
-                return True
-        except Exception:
-            pass
-
-    return False
+    return True
 
 
 def reset_master_results(results_dir: str, reset_row: bool = False):
@@ -88,36 +79,29 @@ def reset_master_results(results_dir: str, reset_row: bool = False):
     """
     proposed_csv = os.path.join(results_dir, "master_proposed_threshold_results.csv")
     row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
-    db_path = os.path.join(results_dir, "experiments.db")
+    db_path = get_db_path(results_dir)
 
-    targets = [
-        proposed_csv, proposed_csv + ".backup.csv",
-        os.path.join(results_dir, "master_proposed_threshold_results.xlsx")
-    ]
+    targets = [proposed_csv]
     if reset_row:
-        targets.extend([row_csv, row_csv + ".backup.csv", os.path.join(results_dir, "master_row_threshold_results.xlsx")])
+        targets.append(row_csv)
 
     print("\n" + "=" * 80)
-    print(" [RESET MEMORY] Cleaning up existing master result files for fresh accumulation")
+    print(" [RESET MEMORY] Dropping existing result tables and their CSV exports")
+    # A reset that only half-succeeds leaves stale rows that later look like real
+    # results, so any failure here stops the run instead of printing a warning.
     for path in targets:
         if os.path.exists(path):
-            try:
-                os.remove(path)
-                print(f"  -> Removed existing file: {path}")
-            except Exception as e:
-                print(f"  -> Warning: Could not remove {path} ({e})")
+            os.remove(path)
+            print(f"  -> Removed derived CSV export: {path}")
 
     if os.path.exists(db_path):
-        try:
-            with sqlite3.connect(db_path, timeout=10.0) as conn:
-                cursor = conn.cursor()
-                cursor.execute("DROP TABLE IF EXISTS master_proposed_threshold_results")
-                if reset_row:
-                    cursor.execute("DROP TABLE IF EXISTS master_row_threshold_results")
-                conn.commit()
-                print(f"  -> Dropped SQLite table(s) from {db_path}")
-        except Exception as e:
-            print(f"  -> Warning: Could not drop SQLite table ({e})")
+        with sqlite3.connect(db_path, timeout=10.0) as conn:
+            cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS master_proposed_threshold_results")
+            if reset_row:
+                cursor.execute("DROP TABLE IF EXISTS master_row_threshold_results")
+            conn.commit()
+            print(f"  -> Dropped SQLite table(s) from {db_path}")
     print("=" * 80 + "\n")
 
 
@@ -133,6 +117,7 @@ def run_unified_threshold_experiments():
     parser.add_argument('--dry-run', action='store_true', help='Print planned tasks without execution')
     parser.add_argument('--eval-only', '--inference-only', action='store_true', default=False, help='Run inference and threshold evaluation only using pre-saved model checkpoints (do not retrain and do not skip existing results)')
     parser.add_argument('--overwrite', '--force-eval', action='store_true', default=False, help='Force re-evaluation and overwrite existing results for specified dataset/model/seed without running full reset')
+    parser.add_argument('--keep-going', action='store_true', default=False, help='Continue the batch after a task fails (default: abort immediately on the first failure)')
     args = parser.parse_args()
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -352,9 +337,15 @@ def run_unified_threshold_experiments():
 
                 successful_runs += 1
 
-            except Exception as e:
+            except Exception:
                 failed_runs += 1
-                print(f"[ERROR] Task failed (DATA={ds}, MODEL={model_name}, SEED={seed}): {e}")
+                print(f"\n[ERROR] Task failed (DATA={ds}, MODEL={model_name}, SEED={seed}).")
+                if not args.keep_going:
+                    # Fail fast by default: a partially-populated results table is
+                    # worse than a stopped batch, because the missing rows are
+                    # invisible in the exported CSV.
+                    print("[ERROR] Aborting the batch. Re-run with --keep-going to skip failures instead.")
+                    raise
                 import traceback
                 traceback.print_exc()
 
@@ -373,6 +364,11 @@ def run_unified_threshold_experiments():
     print(f" Master Row CSV       : {master_row_csv_path}")
     print(f" Master Proposed CSV  : {master_proposed_csv_path}")
     print("=" * 80 + "\n")
+
+    if failed_runs > 0:
+        # Reached only under --keep-going; exit non-zero so an incomplete batch
+        # cannot be mistaken for a successful one by a caller or a shell script.
+        sys.exit(1)
 
 
 if __name__ == "__main__":

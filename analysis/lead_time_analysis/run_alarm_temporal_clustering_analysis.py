@@ -7,12 +7,6 @@ import seaborn as sns
 
 try:
     import torch
-    _orig_torch_load = torch.load
-    def _patched_torch_load(*args, **kwargs):
-        if 'weights_only' not in kwargs:
-            kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _patched_torch_load
 except ImportError:
     torch = None
 
@@ -20,20 +14,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 if EXPERIMENTS_DIR not in sys.path:
     sys.path.insert(0, EXPERIMENTS_DIR)
+ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if ANALYSIS_DIR not in sys.path:
+    sys.path.insert(0, ANALYSIS_DIR)
 
 import config
 from data_loader import load_dataset
 from checkpoint_utils import load_checkpoint
 from evaluator import RollingEvaluator
+from analysis_data_loader import load_threshold_map
 
-config.PIPELINE_VERSION = "v2"
-
-DEFAULT_THRESHOLDS = {
-    ("HGST_20HUH721212ALN604", "LGBM"): 0.99,
-    ("HGST_20HUH721212ALN604", "XGB"): 0.46,
-    ("HGST_20HUH721212ALN604", "LSTM"): 0.11,
-    ("HGST_20HUH721212ALN604", "GRU"): 0.16,
-}
 
 # Trendy Academic Palette (Option B)
 STYLE_CONFIG = {
@@ -42,24 +32,6 @@ STYLE_CONFIG = {
     "lstm": {"fill": "#7570b3", "edge": "#000000", "title": "LSTM"},
     "gru":  {"fill": "#1b9e77", "edge": "#000000", "title": "GRU"}
 }
-
-
-def load_threshold_map() -> dict:
-    threshold_map = {}
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-    if os.path.exists(master_csv):
-        try:
-            df = pd.read_csv(master_csv, encoding='utf-8-sig')
-            for _, row in df.iterrows():
-                hdd = str(row['데이터']).strip()
-                model_name = str(row['Model']).upper()
-                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in row else 'Threshold'
-                thresh = float(row[thresh_col])
-                threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Loaded Proposed-Opt thresholds from CSV -> {master_csv}")
-        except Exception as e:
-            print(f"[Threshold Loader] Error loading master CSV: {e}")
-    return threshold_map
 
 
 def extract_all_alarm_events(hdd_name: str, model_name: str, threshold: float):
@@ -181,12 +153,12 @@ def main():
         print(f"[Data Loader] Loading pre-extracted temporal clustering events from {csv_path}")
         full_df = pd.read_csv(csv_path)
     else:
-        threshold_map = load_threshold_map()
+        threshold_map = load_threshold_map(seed=config.SEED)
         all_events_list = []
         for m in models:
             model_upper = model_titles[m].upper()
             lookup_key = "LGBM" if model_upper == "LIGHTGBM" else ("XGB" if model_upper == "XGBOOST" else model_upper)
-            thresh = threshold_map.get((hdd_name, lookup_key), DEFAULT_THRESHOLDS.get((hdd_name, lookup_key), 0.5))
+            thresh = threshold_map[(hdd_name, lookup_key)]
 
             df_ev, _ = extract_all_alarm_events(hdd_name, m, thresh)
             all_events_list.append(df_ev)

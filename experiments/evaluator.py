@@ -1,13 +1,9 @@
 import os
-import sys
 import sqlite3
-from datetime import datetime
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 
-from sklearn.metrics import roc_auc_score, precision_recall_curve, auc, precision_score, recall_score, f1_score
+from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 try:
     import torch
 except ImportError:
@@ -16,39 +12,57 @@ except ImportError:
 from tqdm import tqdm
 import config
 
+# Decision-threshold search grid: 0.001 .. 0.999 in steps of 0.001 (paper 4.2).
+THRESHOLD_GRID = np.linspace(0.001, 0.999, 999)
 
-def find_best_threshold_row_level(y_true, y_prob, max_far=0.01):
+
+def find_best_threshold_row_level(y_true, y_prob, max_far=None):
     """
     Finds the decision threshold that maximizes Row-Level Recall subject to
-    Row-Level FAR <= max_far (default 1%) on the given validation (y_true, y_prob) set.
+    Row-Level FAR <= max_far on the given validation (y_true, y_prob) set.
+
+    If NO threshold on the grid satisfies the FAR constraint, the constraint is
+    infeasible for this model/dataset. That is a documented outcome, not an
+    error: the threshold minimizing FAR (ties broken by higher Recall) is
+    returned and a prominent notice is emitted so the run is never silently
+    reported as constraint-satisfying.
     """
+    if max_far is None:
+        max_far = config.MAX_FAR
+
     y_true = np.asarray(y_true)
     y_prob = np.asarray(y_prob)
 
-    thresholds = np.linspace(0.001, 0.999, 999)
-    n_pos = np.sum(y_true == 1)
-    n_neg = np.sum(y_true == 0)
+    n_pos = int(np.sum(y_true == 1))
+    n_neg = int(np.sum(y_true == 0))
+    if n_pos == 0 or n_neg == 0:
+        raise ValueError(
+            f"[Threshold Search] Row-level threshold search needs both classes present in the "
+            f"validation set, got n_pos={n_pos}, n_neg={n_neg}. Refusing to emit a meaningless "
+            f"threshold."
+        )
 
     best_recall = -1.0
     best_far = 2.0
-    best_threshold = 0.5
+    best_threshold = None
 
-    fallback_threshold = 0.5
-    fallback_min_far = 2.0
-    fallback_max_recall = -1.0
+    # Best achievable point if the constraint turns out to be infeasible.
+    infeasible_threshold = None
+    infeasible_min_far = 2.0
+    infeasible_recall = -1.0
 
-    for thresh in thresholds:
+    for thresh in THRESHOLD_GRID:
         y_pred = (y_prob >= thresh).astype(int)
         tp = np.sum((y_pred == 1) & (y_true == 1))
         fp = np.sum((y_pred == 1) & (y_true == 0))
 
-        recall = float(tp / n_pos) if n_pos > 0 else 0.0
-        far = float(fp / n_neg) if n_neg > 0 else 0.0
+        recall = float(tp / n_pos)
+        far = float(fp / n_neg)
 
-        if (far < fallback_min_far) or (far == fallback_min_far and recall > fallback_max_recall):
-            fallback_min_far = far
-            fallback_max_recall = recall
-            fallback_threshold = thresh
+        if (far < infeasible_min_far) or (far == infeasible_min_far and recall > infeasible_recall):
+            infeasible_min_far = far
+            infeasible_recall = recall
+            infeasible_threshold = thresh
 
         if far <= max_far:
             if (recall > best_recall) or (recall == best_recall and far < best_far):
@@ -56,9 +70,14 @@ def find_best_threshold_row_level(y_true, y_prob, max_far=0.01):
                 best_far = far
                 best_threshold = thresh
 
-    if best_recall < 0:
-        best_threshold = fallback_threshold
-        best_recall = fallback_max_recall
+    if best_threshold is None:
+        print("!" * 80)
+        print(f"[CONSTRAINT INFEASIBLE] No threshold on the grid satisfies Row-level FAR <= {max_far:.4f}.")
+        print(f"  Minimum achievable validation FAR = {infeasible_min_far:.6f} at threshold {infeasible_threshold:.3f}.")
+        print(f"  Falling back to that best-achievable threshold. The reported run does NOT satisfy")
+        print(f"  the FAR constraint stated in the experiment design -- report it as such.")
+        print("!" * 80)
+        return float(infeasible_threshold), float(infeasible_recall)
 
     return float(best_threshold), float(best_recall)
 
@@ -68,26 +87,28 @@ def calculate_row_level_metrics(y_true, y_prob, threshold=0.5):
     Computes sample-wise (row-level) metrics at specified threshold.
     """
     y_pred = (y_prob >= threshold).astype(int)
-    
+
     tp = int(np.sum((y_pred == 1) & (y_true == 1)))
     fp = int(np.sum((y_pred == 1) & (y_true == 0)))
     fn = int(np.sum((y_pred == 0) & (y_true == 1)))
     tn = int(np.sum((y_pred == 0) & (y_true == 0)))
-    
-    try:
-        auroc = float(roc_auc_score(y_true, y_prob))
-    except Exception:
-        auroc = 0.5
-    # Skip PR-AUC calculation for speed optimization
+
+    # No try/except: a failing roc_auc_score means the evaluation set is degenerate
+    # (single class), which must surface rather than be papered over with 0.5.
+    auroc = float(roc_auc_score(y_true, y_prob))
+    # NOTE: PR-AUC is deliberately NOT computed (cost); the constant below is a
+    # placeholder, not a measurement. Do not report it.
     pr_auc = 0.0
-        
+
     prec = float(precision_score(y_true, y_pred, zero_division=0))
     rec = float(recall_score(y_true, y_pred, zero_division=0))
     f1 = float(f1_score(y_true, y_pred, zero_division=0))
-    
-    n_neg = np.sum(y_true == 0)
-    far = float(fp / n_neg) if n_neg > 0 else 0.0
-    
+
+    n_neg = int(np.sum(y_true == 0))
+    if n_neg == 0:
+        raise ValueError("[Row Metrics] Evaluation set contains no negative rows; FAR is undefined.")
+    far = float(fp / n_neg)
+
     return {
         'tp': tp,
         'fp': fp,
@@ -100,6 +121,20 @@ def calculate_row_level_metrics(y_true, y_prob, threshold=0.5):
         'auroc': auroc,
         'far': far
     }
+
+
+def _assert_non_negative_lead_time(days_to_failure, serial_number):
+    """A first alarm dated after the failure date breaks the Lead Time definition
+    (LT_d = t_failure - t_alarm >= 0) and would be silently miscounted as 'Early'.
+    It can only mean upstream corruption (post-failure rows, non-chronological
+    segments), so fail loudly instead of absorbing it into a metric."""
+    if days_to_failure < 0:
+        raise ValueError(
+            f"[Operational Evaluation] Disk '{serial_number}' produced a first alarm "
+            f"{-days_to_failure} day(s) AFTER its failure date (Lead Time = {days_to_failure}). "
+            f"Lead Time must be non-negative. Inspect the preprocessed data for rows observed "
+            f"after the failure date or non-chronological segment ordering."
+        )
 
 
 class RollingEvaluator:
@@ -215,22 +250,32 @@ class RollingEvaluator:
             })
         return raw_preds
 
-    def find_best_threshold_proposed_level(self, raw_preds, max_eap=None, max_far=None, lead_time=30):
+    def find_best_threshold_proposed_level(self, raw_preds, max_eap=None, max_far=None, lead_time=None):
         """
-        Finds the minimum threshold that satisfies Disk-level EAP (Early Alarm Proportion) <= max_eap (default 1% / 0.01)
-        on validation predictions.
+        Finds the minimum threshold that satisfies Disk-level EAP (Early Alarm
+        Proportion) <= max_eap on validation predictions.
+
+        If NO threshold on the grid satisfies the EAP constraint, the constraint is
+        infeasible for this model/dataset (observed for HGST/LGBM, whose skewed
+        probability output never drives EAP below 1%). That is a documented outcome,
+        not an error: the threshold minimizing EAP (ties broken by higher ODR) is
+        returned and a prominent notice is emitted so the run is never silently
+        reported as constraint-satisfying.
         """
         if max_eap is None:
-            max_eap = getattr(config, 'MAX_EAP', getattr(config, 'MAX_FAR', 0.01))
+            max_eap = config.MAX_EAP
+        if lead_time is None:
+            lead_time = config.TARGET_LEAD_TIME
 
-        thresholds = np.linspace(0.001, 0.999, 999)
         total_disks = len(raw_preds)
-        
-        fallback_threshold = 0.5
-        fallback_min_eap = 2.0
-        fallback_max_odr = -1.0
+        if total_disks == 0:
+            raise ValueError("[Threshold Search] Disk-level threshold search received zero disks.")
 
-        for thresh in thresholds:
+        infeasible_threshold = None
+        infeasible_min_eap = 2.0
+        infeasible_odr = -1.0
+
+        for thresh in THRESHOLD_GRID:
             n_ontime, n_early, n_missed, n_cens_early, n_cens_no_alarm = 0, 0, 0, 0, 0
             for disk in raw_preds:
                 has_failed = disk['has_failed']
@@ -243,7 +288,8 @@ class RollingEvaluator:
                         first_alarm_idx = np.where(alarm_mask)[0][0]
                         first_alarm_date = pd.to_datetime(disk['dates'][first_alarm_idx])
                         days_to_failure = (disk['failure_date'] - first_alarm_date).days
-                        if 0 <= days_to_failure <= lead_time:
+                        _assert_non_negative_lead_time(days_to_failure, disk['serial_number'])
+                        if days_to_failure <= lead_time:
                             n_ontime += 1
                         else:
                             n_early += 1
@@ -254,23 +300,29 @@ class RollingEvaluator:
                         n_cens_early += 1
                     else:
                         n_cens_no_alarm += 1
-                        
+
             n_failed = n_ontime + n_early + n_missed
             odr = float(n_ontime / n_failed) if n_failed > 0 else 0.0
-            eap = float((n_early + n_cens_early) / total_disks) if total_disks > 0 else 0.0
+            eap = float((n_early + n_cens_early) / total_disks)
 
-            if (eap < fallback_min_eap) or (eap == fallback_min_eap and odr > fallback_max_odr):
-                fallback_min_eap = eap
-                fallback_max_odr = odr
-                fallback_threshold = thresh
+            if (eap < infeasible_min_eap) or (eap == infeasible_min_eap and odr > infeasible_odr):
+                infeasible_min_eap = eap
+                infeasible_odr = odr
+                infeasible_threshold = thresh
 
             # Return the MINIMUM threshold satisfying EAP <= max_eap constraint
             if eap <= max_eap:
                 return float(thresh), float(odr)
 
-        return float(fallback_threshold), float(fallback_max_odr)
+        print("!" * 80)
+        print(f"[CONSTRAINT INFEASIBLE] No threshold on the grid satisfies Disk-level EAP <= {max_eap:.4f}.")
+        print(f"  Minimum achievable validation EAP = {infeasible_min_eap:.6f} at threshold {infeasible_threshold:.3f}.")
+        print(f"  Falling back to that best-achievable threshold. The reported run does NOT satisfy")
+        print(f"  the EAP constraint stated in the experiment design -- report it as such.")
+        print("!" * 80)
+        return float(infeasible_threshold), float(infeasible_odr)
 
-    def evaluate_proposed_level(self, raw_preds, threshold, lead_time=30):
+    def evaluate_proposed_level(self, raw_preds, threshold, lead_time=None):
         """
         Evaluates Proposed Disk-Level method using raw_preds at a fixed threshold
         strictly following HDD operational metrics definition:
@@ -285,6 +337,11 @@ class RollingEvaluator:
         - ODR = N_ontime / (N_ontime + N_early + N_missed)
         - EAP = (N_early + N_cens_early) / Total_HDDs
         """
+        if lead_time is None:
+            lead_time = config.TARGET_LEAD_TIME
+        if len(raw_preds) == 0:
+            raise ValueError("[Operational Evaluation] Received zero disks to evaluate.")
+
         records = []
         for disk in raw_preds:
             serial = disk['serial_number']
@@ -315,7 +372,8 @@ class RollingEvaluator:
                 alarm_score = float(preds[first_alarm_idx])
                 if has_failed:
                     days_to_failure = (failure_date - first_alarm_date).days
-                    if 0 <= days_to_failure <= lead_time:
+                    _assert_non_negative_lead_time(days_to_failure, serial)
+                    if days_to_failure <= lead_time:
                         is_hit = 1
                         category = "On time"
                     else:
@@ -413,8 +471,37 @@ class RollingEvaluator:
 
 
 # ------------------------------------------------------------------------------
-# Master CSV Result Persistence Functions
+# Result Persistence
+#
+# SINGLE SOURCE OF TRUTH: results/experiments.db (SQLite).
+# The master CSV files are a derived export, regenerated from the DB after every
+# write. Never read results back from the CSV -- read the DB.
 # ------------------------------------------------------------------------------
+CSV_ENCODING = 'utf-8-sig'
+
+# master CSV basename -> authoritative SQLite table
+_TABLE_BY_CSV_KEYWORD = (
+    ('row', 'master_row_threshold_results'),
+    ('proposed', 'master_proposed_threshold_results'),
+)
+
+
+def resolve_table_name(master_csv_path: str) -> str:
+    """Map a master CSV path to its authoritative SQLite table."""
+    filename = os.path.basename(master_csv_path)
+    for keyword, table in _TABLE_BY_CSV_KEYWORD:
+        if keyword in filename:
+            return table
+    raise ValueError(
+        f"[Result Persistence] Cannot determine the SQLite table for '{filename}'. "
+        f"Expected the filename to contain one of: {[k for k, _ in _TABLE_BY_CSV_KEYWORD]}."
+    )
+
+
+def get_db_path(results_dir: str) -> str:
+    return os.path.join(results_dir, "experiments.db")
+
+
 def _normalize_key_val(val):
     if pd.isna(val):
         return ""
@@ -440,83 +527,63 @@ def _clean_and_dedup_rows(df: pd.DataFrame, new_row: pd.DataFrame, key_cols: lis
     return pd.concat([df, new_row], ignore_index=True)
 
 
-def _read_csv_robust(filepath: str) -> pd.DataFrame:
-    encodings = ['utf-8-sig', 'cp949', 'utf-8', 'euc-kr', 'latin1']
-    delimiters = [',', '\t', None]
-    for enc in encodings:
-        for sep in delimiters:
-            try:
-                df = pd.read_csv(filepath, sep=sep, engine='python' if sep is None else 'c', encoding=enc)
-                if df.shape[1] > 1:
-                    cols = list(df.columns)
-                    if len(cols) >= 3 and cols[1] == 'Model':
-                        cols[2] = '데이터'
-                        df.columns = cols
-                    return df
-            except Exception:
-                continue
-    return pd.read_csv(filepath)
+def read_results_table(db_path: str, table_name: str) -> pd.DataFrame:
+    """Read an experiment result table from the authoritative SQLite DB.
+    Returns an empty DataFrame if the DB or table does not exist yet (a genuine
+    'no results recorded' state); any other failure propagates."""
+    if not os.path.exists(db_path):
+        return pd.DataFrame()
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+        if cursor.fetchone() is None:
+            return pd.DataFrame()
+        return pd.read_sql(f"SELECT * FROM [{table_name}]", conn)
 
 
-def save_experiment_result_to_sqlite(db_path: str, table_name: str, row_data: dict, key_cols: list):
+def save_experiment_result_to_sqlite(db_path: str, table_name: str, row_data: dict, key_cols: list) -> pd.DataFrame:
     """
-    Saves or updates experiment result in SQLite database with deduplication.
+    Saves or updates an experiment result in the authoritative SQLite database,
+    replacing any existing row with the same key. Returns the full updated table.
+
+    No try/except: a failed write means results were lost, which must stop the run
+    rather than print a warning that scrolls past in a 156-run batch.
     """
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     df_row = pd.DataFrame([row_data])
 
+    df_existing = read_results_table(db_path, table_name)
+    df_final = df_row if df_existing.empty else _clean_and_dedup_rows(df_existing, df_row, key_cols)
+
+    with sqlite3.connect(db_path, timeout=30.0) as conn:
+        df_final.to_sql(table_name, conn, if_exists='replace', index=False)
+    print(f"[RESULT LOG] Updated SQLite DB table '{table_name}': {db_path}")
+    return df_final
+
+
+def export_results_table_to_csv(df: pd.DataFrame, master_csv_path: str):
+    """Export an authoritative results table to its derived master CSV.
+
+    A locked CSV (Excel holding the file open) is a hard error: silently diverting
+    to a '.backup.csv' used to leave two files that disagree about the results.
+    """
     try:
-        with sqlite3.connect(db_path, timeout=30.0) as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-            table_exists = cursor.fetchone() is not None
-
-            if table_exists:
-                df_existing = pd.read_sql(f"SELECT * FROM [{table_name}]", conn)
-                df_final = _clean_and_dedup_rows(df_existing, df_row, key_cols)
-            else:
-                df_final = df_row
-
-            df_final.to_sql(table_name, conn, if_exists='replace', index=False)
-            print(f"[RESULT LOG] Updated SQLite DB table '{table_name}': {db_path}")
-    except Exception as e:
-        print(f"[WARNING] SQLite save failed ({e})")
+        df.to_csv(master_csv_path, index=False, encoding=CSV_ENCODING)
+    except PermissionError as e:
+        raise PermissionError(
+            f"[Result Persistence] Cannot write '{master_csv_path}' -- the file is locked "
+            f"(most likely open in Excel). The result IS safely stored in the SQLite DB; close the "
+            f"file and re-export. Refusing to write a divergent backup copy."
+        ) from e
+    print(f"[RESULT LOG] Exported master CSV: {master_csv_path}")
 
 
 def save_experiment_result_to_csv(master_csv_path: str, row_data: dict, key_cols: list):
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    """Record one experiment result: write to the SQLite source of truth, then
+    regenerate the derived master CSV from it."""
     results_dir = os.path.dirname(master_csv_path)
     os.makedirs(results_dir, exist_ok=True)
 
-    # 1. Save to SQLite DB (results/experiments.db)
-    db_path = os.path.join(results_dir, "experiments.db")
-    filename = os.path.basename(master_csv_path)
-    if 'row' in filename:
-        table_name = 'master_row_threshold_results'
-    elif 'proposed' in filename:
-        table_name = 'master_proposed_threshold_results'
-    else:
-        table_name = 'experiment_results'
-
-    save_experiment_result_to_sqlite(db_path, table_name, row_data, key_cols)
-
-    # 2. Sync to Master CSV file
-    df_row = pd.DataFrame([row_data])
-
-    try:
-        if os.path.exists(master_csv_path):
-            df_master = _read_csv_robust(master_csv_path)
-            df_final = _clean_and_dedup_rows(df_master, df_row, key_cols)
-        else:
-            df_final = df_row
-        df_final.to_csv(master_csv_path, index=False, encoding='utf-8-sig')
-        print(f"[RESULT LOG] Updated master CSV: {master_csv_path}")
-    except PermissionError:
-        backup_path = master_csv_path + ".backup.csv"
-        if os.path.exists(backup_path):
-            df_backup = _read_csv_robust(backup_path)
-            df_final = _clean_and_dedup_rows(df_backup, df_row, key_cols)
-        else:
-            df_final = df_row
-        df_final.to_csv(backup_path, index=False, encoding='utf-8-sig')
-        print(f"[WARNING] Master CSV locked. Saved to backup: {backup_path}")
+    table_name = resolve_table_name(master_csv_path)
+    df_final = save_experiment_result_to_sqlite(get_db_path(results_dir), table_name, row_data, key_cols)
+    export_results_table_to_csv(df_final, master_csv_path)

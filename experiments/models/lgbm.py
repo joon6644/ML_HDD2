@@ -67,17 +67,12 @@ def train_lgbm_model(X_train, y_train, X_val=None, y_val=None,
         valid_sets = [train_data]        # no val: train loss only, no early stopping
         callbacks = []
 
-    try:
-        gbm = lgb.train(lgb_params, train_data,
-                        num_boost_round=hp['num_boost_round'],
-                        valid_sets=valid_sets,
-                        callbacks=callbacks)
-    except lgb.basic.LightGBMError:
-        print("[Notice] LightGBM GPU Learner fallback to CPU...")
-        lgb_params['device'] = 'cpu'
-        gbm = lgb.train(lgb_params, train_data,
-                        num_boost_round=hp['num_boost_round'],
-                        valid_sets=valid_sets,
-                        callbacks=callbacks)
+    # No GPU->CPU fallback: LightGBM's GPU and CPU learners do not produce bit-identical
+    # trees, so silently switching devices mid-batch would make some seeds irreproducible
+    # while every result still looks uniform. Fail and let the operator set USE_GPU=False.
+    gbm = lgb.train(lgb_params, train_data,
+                    num_boost_round=hp['num_boost_round'],
+                    valid_sets=valid_sets,
+                    callbacks=callbacks)
 
     return gbm

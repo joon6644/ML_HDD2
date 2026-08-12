@@ -1,6 +1,5 @@
 import numpy as np
 from xgboost import XGBClassifier
-from xgboost.core import XGBoostError
 from .common import compute_sqrt_scale_pos_weight
 
 # Standard Benchmark Hyperparameters
@@ -64,23 +63,9 @@ def train_xgb_model(X_train, y_train, X_val=None, y_val=None,
     # would add noise and inflate memory usage unnecessarily.
     eval_set = [(X_val, y_val)] if has_val else [(X_train, y_train)]
 
-    try:
-        xgb.fit(X_train, y_train, eval_set=eval_set, verbose=False)
-    except XGBoostError as e:
-        print(f"[Notice] XGBoost GPU fallback to CPU due to error: {e}")
-        xgb = XGBClassifier(
-            n_estimators=hp['n_estimators'],
-            learning_rate=hp['learning_rate'],
-            max_depth=hp['max_depth'],
-            subsample=hp['subsample'],
-            colsample_bytree=hp['colsample_bytree'],
-            scale_pos_weight=scale_pos_weight,
-            tree_method=hp['tree_method'],
-            device='cpu',
-            random_state=seed,
-            eval_metric=hp['eval_metric'],
-            early_stopping_rounds=hp['early_stopping_rounds'] if has_val else None
-        )
-        xgb.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+    # No GPU->CPU fallback: the two devices do not produce identical models, so a silent
+    # switch would leave some seeds unreproducible while the results table looks uniform.
+    # Fail and let the operator set USE_GPU=False explicitly for the whole batch.
+    xgb.fit(X_train, y_train, eval_set=eval_set, verbose=False)
 
     return xgb

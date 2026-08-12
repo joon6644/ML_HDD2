@@ -48,11 +48,11 @@ SAVE_MODEL_WEIGHTS = True
 # 15. 표준 벤치마크 실험 대상 상수
 ALL_DATASETS = ['HGST_20HUH721212ALN604', 'ST12000NM0007', 'TOSHIBA_20MG07ACA14TA', ]
 ALL_MODELS = ['lstm', 'gru', 'xgb', 'lgbm']
-ALL_SEEDS = [42, 
+ALL_SEEDS = [
+            42, 
             43, 44, 45, 46,
-            47, 48, 49, 
-            50, 51, 52, 53, 54, 
-            # 55, 56, 57, 58, 59, 60, 61, 62
+            47, 48, 49, 50, 51, 52, 53, 54, 
+            55, 56, 57, 58, 59, 60, 61, 62
             ]
 
 

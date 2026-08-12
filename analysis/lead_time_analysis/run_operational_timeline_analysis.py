@@ -6,35 +6,23 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import seaborn as sns
 
-try:
-    import torch
-    _orig_torch_load = torch.load
-    def _patched_torch_load(*args, **kwargs):
-        if 'weights_only' not in kwargs:
-            kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _patched_torch_load
-except ImportError:
-    torch = None
-
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 if EXPERIMENTS_DIR not in sys.path:
     sys.path.insert(0, EXPERIMENTS_DIR)
+ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if ANALYSIS_DIR not in sys.path:
+    sys.path.insert(0, ANALYSIS_DIR)
+
+try:
+    import torch
+except ImportError:
+    torch = None
 
 import config
 from data_loader import load_dataset
-from checkpoint_utils import CHECKPOINT_DIR
 from evaluator import RollingEvaluator
-
-config.PIPELINE_VERSION = "v2"
-
-DEFAULT_THRESHOLDS = {
-    ("HGST_20HUH721212ALN604", "LGBM"): 0.998,
-    ("HGST_20HUH721212ALN604", "XGB"): 0.478,
-    ("HGST_20HUH721212ALN604", "LSTM"): 0.327,
-    ("HGST_20HUH721212ALN604", "GRU"): 0.662,
-}
+from analysis_data_loader import load_threshold_map, load_analysis_model
 
 MODEL_TITLES = {
     "lgbm": "LightGBM",
@@ -47,91 +35,9 @@ MODEL_TITLES = {
 STANDARD_LINE_COLOR = "#1f77b4"
 
 
-def _read_master_csv(path: str) -> pd.DataFrame:
-    for encoding in ('utf-8-sig', 'cp949'):
-        for sep in (',', '\t'):
-            try:
-                df = pd.read_csv(path, encoding=encoding, sep=sep)
-                if df.shape[1] > 1:
-                    return df
-            except (UnicodeDecodeError, pd.errors.ParserError):
-                continue
-    raise ValueError(f"Could not parse master CSV: {path}")
-
-
-def load_threshold_map(seed: int = 42) -> dict:
-    threshold_map = DEFAULT_THRESHOLDS.copy()
-    db_path = os.path.join(PROJECT_ROOT, "results", "experiments.db")
-    
-    if os.path.exists(db_path):
-        try:
-            import sqlite3
-            with sqlite3.connect(db_path) as conn:
-                df = pd.read_sql("SELECT 데이터, Model, [Threshold (Proposed-Opt)] FROM master_proposed_threshold_results WHERE Seed=?", conn, params=(seed,))
-                for _, row in df.iterrows():
-                    hdd = str(row['데이터']).strip()
-                    model_name = str(row['Model']).upper()
-                    thresh = float(row['Threshold (Proposed-Opt)'])
-                    threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Successfully loaded Seed {seed} proposed thresholds from SQLite -> {db_path}")
-            return threshold_map
-        except Exception as e:
-            print(f"[Threshold Loader] Warning loading from SQLite ({e}). Trying CSV...")
-            
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-    if os.path.exists(master_csv):
-        try:
-            df = _read_master_csv(master_csv)
-            if 'Seed' in df.columns:
-                df = df[df['Seed'] == seed]
-            for _, row in df.iterrows():
-                hdd = str(row['데이터']).strip()
-                model_name = str(row['Model']).upper()
-                thresh_col = 'Threshold (Proposed-Opt)' if 'Threshold (Proposed-Opt)' in df.columns else 'Threshold'
-                thresh = float(row[thresh_col])
-                threshold_map[(hdd, model_name)] = thresh
-            print(f"[Threshold Loader] Loaded thresholds from CSV -> {master_csv}")
-        except Exception as e:
-            print(f"[Threshold Loader] Warning: Could not read master CSV ({e}). Using defaults.")
-    return threshold_map
-
-
-def load_checkpoint_flexible(model_name: str, seed: int, lead_time: int, dataset_name: str, input_dim: int):
-    clean_ds = os.path.basename(dataset_name.rstrip('/\\'))
-    candidates = [
-        f"{model_name.lower()}_none_cw0_focal0_lead{lead_time}_seed{seed}_{clean_ds}_pv2.ckpt",
-        f"{model_name.lower()}_none_cw0_focal0_lead{lead_time}_seed{seed}_{clean_ds}_pv3.ckpt",
-        f"{model_name.lower()}_none_lead{lead_time}_seed{seed}_{clean_ds}.ckpt",
-        f"{model_name.lower()}_none_cw0_focal0_lead{lead_time}_seed{seed}_{clean_ds}.ckpt"
-    ]
-    for filename in candidates:
-        full_path = os.path.join(CHECKPOINT_DIR, filename)
-        if os.path.exists(full_path):
-            print(f"[Checkpoint Manager] Found checkpoint: {filename}")
-            payload = torch.load(full_path, map_location='cpu', weights_only=False)
-            ckpt_type = payload.get("type")
-            if ckpt_type == "pytorch":
-                cls_name = payload["class_name"]
-                st_dict = payload["state_dict"]
-                arch_kwargs = {k: v for k, v in payload.get("arch_kwargs", {}).items() if v is not None}
-                if cls_name == "LSTMClass":
-                    from models.lstm import LSTMClass
-                    m = LSTMClass(input_dim=input_dim, **arch_kwargs)
-                elif cls_name == "GRUClass":
-                    from models.gru import GRUClass
-                    m = GRUClass(input_dim=input_dim, **arch_kwargs)
-                else:
-                    raise ValueError(f"Unknown PyTorch model class: {cls_name}")
-                m.load_state_dict(st_dict)
-                if torch.cuda.is_available():
-                    m = m.cuda()
-                return m
-            elif ckpt_type == "sklearn_or_tree":
-                return payload["model_obj"]
-    return None
-
-
-def select_best_operational_samples(raw_preds, threshold: float, lead_time: int = 30):
+def select_best_operational_samples(raw_preds, threshold: float, lead_time: int = None):
+    if lead_time is None:
+        lead_time = config.TARGET_LEAD_TIME
     ontime_candidates = []
     early_candidates = []
     cens_early_candidates = []
@@ -314,22 +220,17 @@ def main():
     for m in target_models:
         model_upper = MODEL_TITLES[m]
         lookup_key = "LGBM" if m == "lgbm" else m.upper()
-        thresh = threshold_map.get((hdd_name, lookup_key), DEFAULT_THRESHOLDS.get((hdd_name, lookup_key), 0.16))
+        thresh = threshold_map[(hdd_name, lookup_key)]
 
         train_df, val_df, test_df, features = load_dataset(hdd_path, model=m)
         is_sequence_model = (m in ['lstm', 'gru'])
 
-        model = load_checkpoint_flexible(
+        model = load_analysis_model(
+            dataset=hdd_name,
             model_name=m,
             seed=config.SEED,
-            lead_time=config.TARGET_LEAD_TIME,
-            dataset_name=hdd_name,
-            input_dim=len(features)
+            features=features
         )
-
-        if model is None:
-            print(f"Warning: Checkpoint not found for model '{m}' on '{hdd_name}'. Skipping.")
-            continue
 
         model_type = 'pytorch_class' if is_sequence_model else m
 

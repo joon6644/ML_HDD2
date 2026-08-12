@@ -54,10 +54,14 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
                 f"A distinct test set is required to avoid evaluating on the same data used for threshold tuning. "
                 f"Directory contains: {files}"
             )
+        # Ambiguity here silently decides which split a whole experiment runs on,
+        # so it is an error rather than a warning.
         for name, candidates in [("train", train_candidates), ("val", val_candidates), ("test", test_candidates)]:
             if len(candidates) > 1:
-                print(f"[Warning] Multiple candidate {name} files found in '{splitted_dir}': {candidates}. "
-                      f"Using '{candidates[0]}' (alphabetically first) for determinism.")
+                raise ValueError(
+                    f"[Data Loader] Multiple candidate {name} files found in '{splitted_dir}': {candidates}. "
+                    f"Refusing to guess which split to use -- leave exactly one *_{name}.parquet in the directory."
+                )
 
         train_file, val_file, test_file = train_candidates[0], val_candidates[0], test_candidates[0]
         train_path = os.path.join(splitted_dir, train_file)
@@ -98,11 +102,21 @@ def load_dataset(splitted_dir: str = None, lead_time: int = None, drop_failure_d
         exclude_cols = config.EXCLUDE_COLS
         features = [c for c in train_df.columns if c not in exclude_cols]
 
-        for df in [train_df, val_df, test_df]:
+        # Preprocessing already removes remaining missing values (paper 4.1.2 step 5),
+        # so a NaN here means the preprocessing contract was broken. Imputing it with
+        # 0 would feed a fabricated SMART reading into training and evaluation.
+        for name, df in [("train", train_df), ("val", val_df), ("test", test_df)]:
             for col in features:
                 if df[col].dtype != 'float32':
                     df[col] = df[col].astype('float32')
-            df[features] = df[features].fillna(0)
+            na_counts = df[features].isna().sum()
+            if na_counts.any():
+                offending = na_counts[na_counts > 0].to_dict()
+                raise ValueError(
+                    f"[Data Loader] Missing values found in feature columns of the {name.upper()} split "
+                    f"of '{splitted_dir}': {offending}. Preprocessing is expected to leave no NaNs; "
+                    f"re-run preprocessing rather than imputing at load time."
+                )
 
         if use_cache:
             _DATASET_CACHE[cache_key] = (train_df.copy(), val_df.copy(), test_df.copy(), features)

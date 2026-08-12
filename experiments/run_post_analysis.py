@@ -49,7 +49,6 @@ def run_post_analysis(checkpoint_path=None, model_name=None, imbalance_strategy=
     print(f" Imbalance Strategy   : {imbalance_strategy.upper()}")
     print(f" Dataset              : {dataset_path}")
     print(f" Lead Time Horizon    : {lead_time} days")
-    print(f" Pipeline Version     : {config.PIPELINE_VERSION}")
     print("=" * 70)
 
     # 1. Load Data

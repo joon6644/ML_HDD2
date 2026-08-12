@@ -7,12 +7,6 @@ import seaborn as sns
 
 try:
     import torch
-    _orig_torch_load = torch.load
-    def _patched_torch_load(*args, **kwargs):
-        if 'weights_only' not in kwargs:
-            kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _patched_torch_load
 except ImportError:
     torch = None
 
@@ -20,11 +14,15 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(_
 EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 if EXPERIMENTS_DIR not in sys.path:
     sys.path.insert(0, EXPERIMENTS_DIR)
+ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if ANALYSIS_DIR not in sys.path:
+    sys.path.insert(0, ANALYSIS_DIR)
 
 import config
 from data_loader import load_dataset
 from checkpoint_utils import load_checkpoint
 from evaluator import RollingEvaluator
+from analysis_data_loader import load_threshold_map
 
 SEED = 42
 HDD_NAME = "HGST_20HUH721212ALN604"
@@ -43,28 +41,6 @@ STYLE_CONFIG = {
     "lstm": {"fill": "#7570b3", "edge": "#000000"},
     "gru":  {"fill": "#1b9e77", "edge": "#000000"}
 }
-
-
-def _read_master_csv(path: str) -> pd.DataFrame:
-    for encoding in ('utf-8-sig', 'cp949'):
-        for sep in (',', '\t'):
-            try:
-                df = pd.read_csv(path, encoding=encoding, sep=sep)
-                if df.shape[1] > 1:
-                    return df
-            except (UnicodeDecodeError, pd.errors.ParserError):
-                continue
-    raise ValueError(f"Could not parse master CSV: {path}")
-
-
-def load_threshold_map(seed: int) -> dict:
-    master_csv = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-    threshold_map = {}
-    df = _read_master_csv(master_csv)
-    df = df[df['Seed'].astype(int) == seed]
-    for _, row in df.iterrows():
-        threshold_map[(str(row['데이터']).strip(), str(row['Model']).upper())] = float(row['Threshold (Proposed-Opt)'])
-    return threshold_map
 
 
 def evaluate_one(dataset: str, model_name: str, threshold: float = None):

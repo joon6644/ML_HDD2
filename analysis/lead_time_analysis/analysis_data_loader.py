@@ -1,77 +1,134 @@
+"""Single access point for everything the analysis scripts need from the
+experiment run.
+
+SOURCE OF TRUTH: results/experiments.db (SQLite). Operating thresholds and
+checkpoints are read from there and from checkpoints/ via the same loaders the
+experiments used -- never from hardcoded tables, never from the derived master
+CSV exports, and never by guessing at filenames. If a value is missing, that is
+an error: producing a figure from a substituted threshold is worse than
+producing no figure.
+"""
 import os
 import sys
-import sqlite3
-import pandas as pd
-import numpy as np
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 if EXPERIMENTS_DIR not in sys.path:
     sys.path.insert(0, EXPERIMENTS_DIR)
 
+import pandas as pd
+
 import config
 from data_loader import load_dataset
 from checkpoint_utils import load_checkpoint
-from evaluator import RollingEvaluator
+from evaluator import RollingEvaluator, read_results_table, get_db_path
 
 try:
     import torch
-    _orig_torch_load = torch.load
-    def _patched_torch_load(*args, **kwargs):
-        if 'weights_only' not in kwargs:
-            kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _patched_torch_load
 except ImportError:
     torch = None
 
-DB_PATH = os.path.join(PROJECT_ROOT, "results", "experiments.db")
-MASTER_CSV_PATH = os.path.join(PROJECT_ROOT, "results", "master_proposed_threshold_results.csv")
-REPORTS_DIR = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis", "reports")
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+DB_PATH = get_db_path(RESULTS_DIR)
+PROPOSED_TABLE = "master_proposed_threshold_results"
+THRESHOLD_COL = "Threshold (Proposed-Opt)"
+REPORTS_DIR = os.path.join(RESULTS_DIR, "lead_time_analysis", "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
+
+SEQUENCE_MODELS = ('lstm', 'gru')
+
+
+def _load_proposed_results(seed: int) -> pd.DataFrame:
+    df = read_results_table(DB_PATH, PROPOSED_TABLE)
+    if df.empty:
+        raise RuntimeError(
+            f"[analysis_data_loader] No experiment results found in '{DB_PATH}' (table "
+            f"'{PROPOSED_TABLE}'). Run experiments/run_unified_threshold_experiments.py first."
+        )
+    df = df[df['Seed'].astype(int) == int(seed)]
+    if df.empty:
+        raise RuntimeError(
+            f"[analysis_data_loader] No results recorded for seed={seed} in '{PROPOSED_TABLE}'."
+        )
+    return df
+
+
+def load_threshold_map(seed: int = 42) -> dict:
+    """Return {(dataset, MODEL_UPPER): proposed-optimal threshold} for one seed.
+
+    This is the only place analysis code learns an operating threshold. There is
+    deliberately no default/fallback table: a stale hardcoded threshold silently
+    produces a plausible-looking but wrong figure.
+    """
+    df = _load_proposed_results(seed)
+    return {
+        (str(row['데이터']).strip(), str(row['Model']).upper()): float(row[THRESHOLD_COL])
+        for _, row in df.iterrows()
+    }
 
 
 def get_proposed_threshold(dataset: str, model_name: str, seed: int = 42) -> float:
-    """
-    Fetches the exact Proposed-Opt threshold from SQLite (experiments.db) as single source of truth.
-    Falls back to master_proposed_threshold_results.csv if SQLite is unavailable.
-    """
-    model_name_upper = model_name.upper()
-    dataset_clean = dataset.strip()
+    """Fetch the exact Proposed-Opt threshold recorded for one (dataset, model, seed)."""
+    df = _load_proposed_results(seed)
+    dataset_clean = str(dataset).strip()
+    model_upper = str(model_name).upper()
 
-    if os.path.exists(DB_PATH):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            cursor = conn.cursor()
-            cursor.execute(
-                "SELECT [Threshold (Proposed-Opt)] FROM master_proposed_threshold_results "
-                "WHERE Seed = ? AND (데이터 = ? OR 데이터 LIKE ?) AND UPPER(Model) = ?",
-                (seed, dataset_clean, f"%{dataset_clean}%", model_name_upper)
-            )
-            row = cursor.fetchone()
-            conn.close()
-            if row and row[0] is not None:
-                return float(row[0])
-        except Exception as e:
-            print(f"[analysis_data_loader] SQLite query fallback warning: {e}")
+    matched = df[
+        (df['데이터'].astype(str).str.strip() == dataset_clean)
+        & (df['Model'].astype(str).str.upper() == model_upper)
+    ]
+    if matched.empty:
+        available = sorted({
+            (str(r['데이터']).strip(), str(r['Model']).upper()) for _, r in df.iterrows()
+        })
+        raise KeyError(
+            f"[analysis_data_loader] No threshold recorded for dataset='{dataset_clean}', "
+            f"model='{model_upper}', seed={seed}. Recorded for this seed: {available}"
+        )
+    if len(matched) > 1:
+        raise RuntimeError(
+            f"[analysis_data_loader] {len(matched)} rows recorded for dataset='{dataset_clean}', "
+            f"model='{model_upper}', seed={seed}; the result table should hold exactly one. "
+            f"Deduplicate '{PROPOSED_TABLE}' before analysing."
+        )
+    return float(matched.iloc[0][THRESHOLD_COL])
 
-    if os.path.exists(MASTER_CSV_PATH):
-        for encoding in ('utf-8-sig', 'cp949'):
-            for sep in (',', '\t'):
-                try:
-                    df = pd.read_csv(MASTER_CSV_PATH, encoding=encoding, sep=sep)
-                    if df.shape[1] > 1:
-                        matched = df[
-                            (df['Seed'].astype(int) == seed) &
-                            (df['Model'].str.upper() == model_name_upper) &
-                            (df['데이터'].str.contains(dataset_clean, regex=False))
-                        ]
-                        if not matched.empty:
-                            return float(matched.iloc[0]['Threshold (Proposed-Opt)'])
-                except Exception:
-                    continue
 
-    raise ValueError(f"[analysis_data_loader] Could not find proposed threshold for dataset='{dataset}', model='{model_name}', seed={seed}")
+def window_size_for(model_name: str) -> int:
+    return config.WINDOW_SIZE if model_name.lower() in SEQUENCE_MODELS else 1
+
+
+def load_analysis_model(dataset: str, model_name: str, seed: int, features: list):
+    """Load the trained model for (dataset, model, seed) using the same checkpoint
+    naming the experiments wrote. A missing checkpoint is an error -- analysis must
+    not quietly fall back to a differently-configured run."""
+    data_path = os.path.join(PROJECT_ROOT, "data", "splitted", dataset)
+    is_sequence_model = model_name.lower() in SEQUENCE_MODELS
+
+    model = load_checkpoint(
+        model_name.lower(), "none", seed, config.TARGET_LEAD_TIME, data_path,
+        input_dim=len(features), features=features,
+        window_size=config.WINDOW_SIZE if is_sequence_model else None
+    )
+    if model is None:
+        raise FileNotFoundError(
+            f"[analysis_data_loader] No checkpoint for model='{model_name}', dataset='{dataset}', "
+            f"seed={seed}. Train it via experiments/run_unified_threshold_experiments.py."
+        )
+    return model
+
+
+def build_evaluator(dataset: str, model_name: str, seed: int, features: list) -> RollingEvaluator:
+    model = load_analysis_model(dataset, model_name, seed, features)
+    is_sequence_model = model_name.lower() in SEQUENCE_MODELS
+    return RollingEvaluator(
+        model=model,
+        features=features,
+        window_size=window_size_for(model_name),
+        device='cuda' if (torch is not None and torch.cuda.is_available()) else 'cpu',
+        model_type='pytorch_class' if is_sequence_model else model_name.lower(),
+        seed=seed
+    )
 
 
 def generate_alarm_report(dataset: str, model_name: str, seed: int = 42, threshold: float = None) -> pd.DataFrame:
@@ -82,26 +139,9 @@ def generate_alarm_report(dataset: str, model_name: str, seed: int = 42, thresho
         threshold = get_proposed_threshold(dataset, model_name, seed)
 
     data_path = os.path.join(PROJECT_ROOT, "data", "splitted", dataset)
-    is_sequence_model = model_name.lower() in ['lstm', 'gru']
-    window_size = config.WINDOW_SIZE if is_sequence_model else 1
-
     _, _, test_df, features = load_dataset(data_path, model=model_name.lower())
 
-    model = load_checkpoint(
-        model_name.lower(), "none", seed, config.TARGET_LEAD_TIME, data_path,
-        input_dim=len(features), features=features,
-        window_size=window_size if is_sequence_model else None
-    )
-    if model is None:
-        raise FileNotFoundError(f"[analysis_data_loader] Checkpoint missing for model='{model_name}', dataset='{dataset}', seed={seed}")
-
-    model_type = 'pytorch_class' if is_sequence_model else model_name.lower()
-    evaluator = RollingEvaluator(
-        model=model, features=features, window_size=window_size,
-        device='cuda' if (torch is not None and torch.cuda.is_available()) else 'cpu',
-        model_type=model_type, seed=seed
-    )
-
+    evaluator = build_evaluator(dataset, model_name, seed, features)
     raw_preds = evaluator.get_raw_predictions(test_df, lead_time=config.TARGET_LEAD_TIME)
     _, report_df = evaluator.evaluate_proposed_level(raw_preds, threshold=threshold)
 
@@ -117,28 +157,25 @@ def generate_alarm_report(dataset: str, model_name: str, seed: int = 42, thresho
 
 def load_alarm_report(dataset: str, model_name: str, seed: int = 42, force_recompute: bool = False) -> pd.DataFrame:
     """
-    Loads alarm report DataFrame. Automatically validates threshold against SQLite/Master CSV.
-    If threshold has changed or force_recompute=True, re-evaluates and updates report CSV automatically.
+    Loads the disk-level alarm report, using the cached CSV only when it was
+    produced at the threshold currently recorded in the DB. A cache that cannot be
+    verified against the source of truth is recomputed, never returned as-is.
     """
     current_thresh = get_proposed_threshold(dataset, model_name, seed)
     model_name_upper = model_name.upper()
-    csv_fname = f"seed{seed}_alarm_report_{dataset}_{model_name_upper}.csv"
-    csv_path = os.path.join(REPORTS_DIR, csv_fname)
+    csv_path = os.path.join(REPORTS_DIR, f"seed{seed}_alarm_report_{dataset}_{model_name_upper}.csv")
 
     if not force_recompute and os.path.exists(csv_path):
-        try:
-            df = pd.read_csv(csv_path)
-            if 'threshold_used' in df.columns and len(df) > 0:
-                cached_thresh = float(df['threshold_used'].iloc[0])
-                if abs(cached_thresh - current_thresh) < 1e-4:
-                    return df
-                else:
-                    print(f"[analysis_data_loader] Threshold changed for {dataset}/{model_name_upper}: {cached_thresh:.4f} -> {current_thresh:.4f}. Recomputing...")
-            else:
-                # If threshold_used column missing in legacy CSV, check matching or recompute
+        df = pd.read_csv(csv_path)
+        if 'threshold_used' not in df.columns or len(df) == 0:
+            print(f"[analysis_data_loader] Cached report {os.path.basename(csv_path)} carries no "
+                  f"threshold provenance. Recomputing...")
+        else:
+            cached_thresh = float(df['threshold_used'].iloc[0])
+            if abs(cached_thresh - current_thresh) < 1e-4:
                 return df
-        except Exception:
-            pass
+            print(f"[analysis_data_loader] Threshold changed for {dataset}/{model_name_upper}: "
+                  f"{cached_thresh:.4f} -> {current_thresh:.4f}. Recomputing...")
 
     print(f"[analysis_data_loader] Generating alarm report: {dataset} | {model_name_upper} | thr={current_thresh:.4f}")
     df = generate_alarm_report(dataset, model_name, seed=seed, threshold=current_thresh)

@@ -7,12 +7,6 @@ import seaborn as sns
 
 try:
     import torch
-    _orig_torch_load = torch.load
-    def _patched_torch_load(*args, **kwargs):
-        if 'weights_only' not in kwargs:
-            kwargs['weights_only'] = False
-        return _orig_torch_load(*args, **kwargs)
-    torch.load = _patched_torch_load
 except ImportError:
     torch = None
 
@@ -22,14 +16,14 @@ if PROJECT_ROOT not in sys.path:
 EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 if EXPERIMENTS_DIR not in sys.path:
     sys.path.insert(0, EXPERIMENTS_DIR)
+ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if ANALYSIS_DIR not in sys.path:
+    sys.path.insert(0, ANALYSIS_DIR)
 
 import config
 from data_loader import load_dataset
-from checkpoint_utils import CHECKPOINT_DIR
 from evaluator import RollingEvaluator
-from analysis.lead_time_analysis.run_operational_timeline_analysis import load_checkpoint_flexible, load_threshold_map
-
-config.PIPELINE_VERSION = "v2"
+from analysis_data_loader import load_threshold_map, load_analysis_model
 
 MODEL_TITLES = {
     "lgbm": "LightGBM",
@@ -74,16 +68,12 @@ def collect_ordinal_alarm_data(hdd_name: str, model_name: str, threshold: float)
     train_df, val_df, test_df, features = load_dataset(hdd_path, model=model_name)
     is_seq = model_name in ['lstm', 'gru']
 
-    model = load_checkpoint_flexible(
+    model = load_analysis_model(
+        dataset=hdd_name,
         model_name=model_name,
         seed=config.SEED,
-        lead_time=config.TARGET_LEAD_TIME,
-        dataset_name=hdd_name,
-        input_dim=len(features)
+        features=features
     )
-
-    if model is None:
-        raise FileNotFoundError(f"Checkpoint missing for model '{model_name}' on HDD '{hdd_name}'")
 
     evaluator = RollingEvaluator(
         model=model,
@@ -253,7 +243,7 @@ def plot_ordinal_alarm_histogram_2x2(model_data_map: dict, hdd_name: str, output
 def main():
     hdd_name = "HGST_20HUH721212ALN604"
     models = ["lgbm", "xgb", "lstm", "gru"]
-    threshold_map = load_threshold_map()
+    threshold_map = load_threshold_map(seed=config.SEED)
 
     results_dir = os.path.join(PROJECT_ROOT, "results", "lead_time_analysis")
     os.makedirs(results_dir, exist_ok=True)
@@ -265,7 +255,7 @@ def main():
     model_data_map = {}
     for m in models:
         lookup_key = "LGBM" if m.lower() == "lgbm" else ("XGB" if m.lower() == "xgb" else m.upper())
-        thresh = threshold_map.get((hdd_name, lookup_key), 0.5)
+        thresh = threshold_map[(hdd_name, lookup_key)]
         print(f"\n[Processing] Model: {MODEL_TITLES[m]} | Threshold: {thresh:.4f}")
 
         df_rec = collect_ordinal_alarm_data(hdd_name, m, thresh)
