@@ -19,9 +19,10 @@ if EXPERIMENTS_DIR not in sys.path:
 import pandas as pd
 
 import config
+import prediction_cache
 from data_loader import load_dataset
 from checkpoint_utils import load_checkpoint
-from evaluator import RollingEvaluator, read_results_table, get_db_path
+from evaluator import RollingEvaluator, read_results_table, get_db_path, RUNS_TABLE
 
 try:
     import torch
@@ -30,56 +31,56 @@ except ImportError:
 
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
 DB_PATH = get_db_path(RESULTS_DIR)
-PROPOSED_TABLE = "master_proposed_threshold_results"
-THRESHOLD_COL = "Threshold (Proposed-Opt)"
+# Operating threshold chosen under the disk-level FAR constraint (METRIC_DESIGN.md).
+THRESHOLD_COL = "threshold_disk_opt"
 REPORTS_DIR = os.path.join(RESULTS_DIR, "lead_time_analysis", "reports")
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 SEQUENCE_MODELS = ('lstm', 'gru')
 
 
-def _load_proposed_results(seed: int) -> pd.DataFrame:
-    df = read_results_table(DB_PATH, PROPOSED_TABLE)
+def _load_runs(seed: int) -> pd.DataFrame:
+    df = read_results_table(DB_PATH, RUNS_TABLE)
     if df.empty:
         raise RuntimeError(
             f"[analysis_data_loader] No experiment results found in '{DB_PATH}' (table "
-            f"'{PROPOSED_TABLE}'). Run experiments/run_unified_threshold_experiments.py first."
+            f"'{RUNS_TABLE}'). Run experiments/run_unified_threshold_experiments.py first."
         )
-    df = df[df['Seed'].astype(int) == int(seed)]
+    df = df[df['seed'].astype(int) == int(seed)]
     if df.empty:
         raise RuntimeError(
-            f"[analysis_data_loader] No results recorded for seed={seed} in '{PROPOSED_TABLE}'."
+            f"[analysis_data_loader] No results recorded for seed={seed} in '{RUNS_TABLE}'."
         )
     return df
 
 
 def load_threshold_map(seed: int = 42) -> dict:
-    """Return {(dataset, MODEL_UPPER): proposed-optimal threshold} for one seed.
+    """Return {(dataset, MODEL_UPPER): disk-optimal threshold} for one seed.
 
     This is the only place analysis code learns an operating threshold. There is
     deliberately no default/fallback table: a stale hardcoded threshold silently
     produces a plausible-looking but wrong figure.
     """
-    df = _load_proposed_results(seed)
+    df = _load_runs(seed)
     return {
-        (str(row['데이터']).strip(), str(row['Model']).upper()): float(row[THRESHOLD_COL])
+        (str(row['dataset']).strip(), str(row['model']).upper()): float(row[THRESHOLD_COL])
         for _, row in df.iterrows()
     }
 
 
 def get_proposed_threshold(dataset: str, model_name: str, seed: int = 42) -> float:
-    """Fetch the exact Proposed-Opt threshold recorded for one (dataset, model, seed)."""
-    df = _load_proposed_results(seed)
+    """Fetch the exact disk-optimal threshold recorded for one (dataset, model, seed)."""
+    df = _load_runs(seed)
     dataset_clean = str(dataset).strip()
     model_upper = str(model_name).upper()
 
     matched = df[
-        (df['데이터'].astype(str).str.strip() == dataset_clean)
-        & (df['Model'].astype(str).str.upper() == model_upper)
+        (df['dataset'].astype(str).str.strip() == dataset_clean)
+        & (df['model'].astype(str).str.upper() == model_upper)
     ]
     if matched.empty:
         available = sorted({
-            (str(r['데이터']).strip(), str(r['Model']).upper()) for _, r in df.iterrows()
+            (str(r['dataset']).strip(), str(r['model']).upper()) for _, r in df.iterrows()
         })
         raise KeyError(
             f"[analysis_data_loader] No threshold recorded for dataset='{dataset_clean}', "
@@ -89,9 +90,41 @@ def get_proposed_threshold(dataset: str, model_name: str, seed: int = 42) -> flo
         raise RuntimeError(
             f"[analysis_data_loader] {len(matched)} rows recorded for dataset='{dataset_clean}', "
             f"model='{model_upper}', seed={seed}; the result table should hold exactly one. "
-            f"Deduplicate '{PROPOSED_TABLE}' before analysing."
+            f"Deduplicate '{RUNS_TABLE}' before analysing."
         )
     return float(matched.iloc[0][THRESHOLD_COL])
+
+
+def get_raw_predictions(dataset: str, model_name: str, seed: int = 42, split: str = "test",
+                        need_all_alarms: bool = True):
+    """Per-disk predictions for analysis, served from the cache when possible.
+
+    `need_all_alarms=True` (alarm counts, ordinal histograms, temporal clustering)
+    requires the full sequences, which are cached only for the seed those figures
+    use. `need_all_alarms=False` (anything driven by the FIRST alarm) is served from
+    the far smaller step cache.
+
+    Falls back to running inference only when the needed cache layer is absent.
+    """
+    if need_all_alarms:
+        try:
+            return prediction_cache.load_full_predictions_as_raw_preds(dataset, model_name, seed, split)
+        except FileNotFoundError:
+            print(f"[analysis_data_loader] No full-prediction cache for {dataset}/{model_name}/"
+                  f"seed{seed}/{split}; running inference.")
+    else:
+        try:
+            return prediction_cache.load_disk_steps_as_raw_preds(dataset, model_name, seed, split)
+        except FileNotFoundError:
+            print(f"[analysis_data_loader] No step cache for {dataset}/{model_name}/seed{seed}/"
+                  f"{split}; running inference.")
+
+    data_path = os.path.join(PROJECT_ROOT, "data", "splitted", dataset)
+    splits = load_dataset(data_path, model=model_name.lower())
+    df = {"train": splits[0], "val": splits[1], "test": splits[2]}[split]
+    features = splits[3]
+    evaluator = build_evaluator(dataset, model_name, seed, features)
+    return evaluator.get_raw_predictions(df)
 
 
 def window_size_for(model_name: str) -> int:

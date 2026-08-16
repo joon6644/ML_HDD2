@@ -76,14 +76,18 @@ def sweep_thresholds(evaluator: RollingEvaluator, raw_preds: list, thresholds: n
             'recall': metrics['recall'],
             'f1': metrics['f1'],
             'far': metrics['far'],
+            'on_time_share': metrics['on_time_share'],
             'mean_lead_time': metrics['mean_lead_time'],
             'median_lead_time': metrics['median_lead_time'],
             'std_lead_time': metrics['std_lead_time'],
-            'edr_15': metrics['edr_15'],
-            'hits': metrics['tp'],
-            'false_alarms': metrics['fp'],
-            'misses': metrics['fn'],
-            'correct_rejections': metrics['tn'],
+            # Sample size backing the lead-time stats: failed HDDs that raised an
+            # alarm (on-time + early), matching evaluator's `alarmed_failed` population.
+            'hits': metrics['N_ontime'] + metrics['N_early'],
+            'N_on_time': metrics['N_ontime'],
+            'N_early': metrics['N_early'],
+            'N_missed': metrics['N_missed'],
+            'N_censored_early': metrics['N_cens_early'],
+            'N_censored_no_alarm': metrics['N_cens_no_alarm'],
         })
     return pd.DataFrame(records)
 

@@ -34,6 +34,73 @@ MODEL_TITLES = {
 # Standard academic blue for prediction curve
 STANDARD_LINE_COLOR = "#1f77b4"
 
+# Panels draw the last year of each disk's history.
+MAX_DAYS_PLOT = 365
+
+# Each panel illustrates one category, so the representative disk is chosen for
+# how legibly it shows that category rather than for the highest peak score.
+#   On-time  : a lead time clearly inside H -- a case sitting on the boundary
+#              would flip to Early if H moved by a single day.
+#   Early    : an alarm that persists and keeps crossing the threshold on its way
+#              to the failure, showing repeated alarms after the first one.
+#   Cens.    : a probability that rises over the threshold and then falls back
+#              under it, showing an alarm the later observations do not sustain.
+ONTIME_TARGET_LEAD_TIME = 20
+ONTIME_MIN_PEAK_RATIO = 2.0
+EARLY_MIN_SUSTAIN = 0.6
+CENSORED_MIN_PEAK_RATIO = 1.5
+
+
+def _shape_stats(disk, threshold: float) -> dict:
+    """Curve shape over the span the panel actually draws (the last
+    MAX_DAYS_PLOT observations), so selection matches what the reader sees."""
+    preds = np.asarray(disk['preds'])
+    window = preds[-MAX_DAYS_PLOT:]
+    alarms_in_window = np.flatnonzero(window >= threshold)
+    all_alarms = np.flatnonzero(preds >= threshold)
+
+    if len(alarms_in_window) > 0:
+        after_first = window[alarms_in_window[0]:]
+        above = (after_first >= threshold).astype(int)
+        sustain = float(above.mean())
+        volatility = float(np.std(after_first))
+        # Times the curve drops under the threshold and comes back up: the
+        # visual signature of an alarm that keeps re-firing.
+        recrossings = int(np.sum(np.diff(above) == 1))
+    else:
+        sustain = volatility = 0.0
+        recrossings = 0
+
+    return {
+        'peak': float(preds.max()),
+        'last': float(preds[-1]),
+        'sustain': sustain,
+        'volatility': volatility,
+        'recrossings': recrossings,
+        # A disk observed for less than the window makes its panel span a
+        # shorter period than the others, which invites reading the four
+        # timelines on different time scales.
+        'full_history': len(preds) >= MAX_DAYS_PLOT,
+        # The panel annotates the first alarm it can see. If the disk's true
+        # first alarm predates the window, that annotation would name a later
+        # alarm instead, so such disks are only a fallback.
+        'first_alarm_in_window': bool(len(all_alarms) > 0
+                                      and all_alarms[0] >= max(0, len(preds) - MAX_DAYS_PLOT)),
+    }
+
+
+def _pick(candidates, key, condition=None):
+    """Best candidate by `key`, preferring ones that satisfy `condition` and
+    whose first alarm is visible. Both preferences fall back rather than
+    returning nothing, so a panel is never dropped for lack of an ideal case."""
+    if not candidates:
+        return None
+    pool = [c for c in candidates if c['first_alarm_in_window']] or candidates
+    pool = [c for c in pool if c['full_history']] or pool
+    if condition is not None:
+        pool = [c for c in pool if condition(c)] or pool
+    return max(pool, key=key)['disk']
+
 
 def select_best_operational_samples(raw_preds, threshold: float, lead_time: int = None):
     if lead_time is None:
@@ -51,33 +118,49 @@ def select_best_operational_samples(raw_preds, threshold: float, lead_time: int 
 
         alarm_mask = (preds >= threshold)
         alarm_indices = np.where(alarm_mask)[0]
+        record = {'disk': disk, 'lead_time': None, **_shape_stats(disk, threshold)}
 
         if len(alarm_indices) > 0:
             first_alarm_idx = alarm_indices[0]
             first_alarm_date = dates[first_alarm_idx]
             if has_failed and failure_date is not None:
                 days_to_fail = (failure_date - first_alarm_date).days
+                record['lead_time'] = days_to_fail
                 if 0 <= days_to_fail <= lead_time:
-                    ontime_candidates.append((disk, days_to_fail, np.max(preds)))
+                    ontime_candidates.append(record)
                 elif days_to_fail > lead_time:
-                    early_candidates.append((disk, days_to_fail, np.max(preds)))
+                    early_candidates.append(record)
             else:
-                cens_early_candidates.append((disk, None, np.max(preds)))
+                cens_early_candidates.append(record)
         else:
             if has_failed:
-                missed_candidates.append((disk, None, np.max(preds)))
-
-    # Select representative samples based on peak score & operational characteristics
-    ontime_sample = sorted(ontime_candidates, key=lambda x: x[2], reverse=True)[0][0] if ontime_candidates else None
-    early_sample = sorted(early_candidates, key=lambda x: x[2], reverse=True)[0][0] if early_candidates else None
-    cens_early_sample = sorted(cens_early_candidates, key=lambda x: x[2], reverse=True)[0][0] if cens_early_candidates else None
-    missed_sample = sorted(missed_candidates, key=lambda x: x[2], reverse=True)[0][0] if missed_candidates else None
+                missed_candidates.append(record)
 
     return {
-        'On-time': ontime_sample,
-        'Early': early_sample,
-        'Censored Early': cens_early_sample,
-        'Missed': missed_sample
+        # Nearest the target lead time, among cases whose signal clears the
+        # threshold by a visible margin; ties go to the stronger peak.
+        'On-time': _pick(
+            ontime_candidates,
+            key=lambda c: (-abs(c['lead_time'] - ONTIME_TARGET_LEAD_TIME), c['peak']),
+            condition=lambda c: c['peak'] >= ONTIME_MIN_PEAK_RATIO * threshold,
+        ),
+        # Among alarms that persist, the one re-crossing the threshold most
+        # often, so the panel shows an early alarm that keeps re-firing rather
+        # than a single step up.
+        'Early': _pick(
+            early_candidates,
+            key=lambda c: (c['recrossings'], c['volatility']),
+            condition=lambda c: c['sustain'] >= EARLY_MIN_SUSTAIN,
+        ),
+        # Largest fall from peak back under the threshold.
+        'Censored Early': _pick(
+            cens_early_candidates,
+            key=lambda c: c['peak'] - c['last'],
+            condition=lambda c: c['peak'] >= CENSORED_MIN_PEAK_RATIO * threshold and c['last'] < threshold,
+        ),
+        # No alarm to shape the curve; the highest peak shows how close the
+        # missed failure came to being detected.
+        'Missed': _pick(missed_candidates, key=lambda c: c['peak']),
     }
 
 
@@ -103,7 +186,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         ('Missed', (1, 1), "(d) Missed Failure")
     ]
 
-    max_days_plot = 365
+    max_days_plot = MAX_DAYS_PLOT
 
     for key, (r, c), title in categories:
         ax = axes[r, c]

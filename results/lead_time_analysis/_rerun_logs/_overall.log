@@ -1,0 +1,53 @@
+==========================================
+RUNNING: run_threshold_leadtime_sweep
+==========================================
+FAILED: run_threshold_leadtime_sweep (exit 1) -- see results/lead_time_analysis/_rerun_logs/run_threshold_leadtime_sweep.log
+==========================================
+RUNNING: run_far_recall_sweep
+==========================================
+OK: run_far_recall_sweep
+==========================================
+RUNNING: run_hgst_2x2_lead_time
+==========================================
+OK: run_hgst_2x2_lead_time
+==========================================
+RUNNING: run_hgst_alarm_distribution_2x2
+==========================================
+OK: run_hgst_alarm_distribution_2x2
+==========================================
+RUNNING: run_hgst_alarm_escalation_policy_2x2
+==========================================
+OK: run_hgst_alarm_escalation_policy_2x2
+==========================================
+RUNNING: run_hgst_cumulative_detection_2x2
+==========================================
+OK: run_hgst_cumulative_detection_2x2
+==========================================
+RUNNING: run_hgst_ordinal_alarm_histogram_2x2
+==========================================
+OK: run_hgst_ordinal_alarm_histogram_2x2
+==========================================
+RUNNING: run_100pct_stacked_bar_analysis
+==========================================
+OK: run_100pct_stacked_bar_analysis
+==========================================
+RUNNING: run_alarm_frequency_analysis
+==========================================
+OK: run_alarm_frequency_analysis
+==========================================
+RUNNING: run_alarm_temporal_clustering_analysis
+==========================================
+OK: run_alarm_temporal_clustering_analysis
+==========================================
+RUNNING: run_alarm_timing_seed42_analysis
+==========================================
+OK: run_alarm_timing_seed42_analysis
+==========================================
+RUNNING: run_operational_timeline_analysis
+==========================================
+OK: run_operational_timeline_analysis
+==========================================
+RUNNING: build_paper_tables
+==========================================
+OK: build_paper_tables
+ALL DONE. status=1

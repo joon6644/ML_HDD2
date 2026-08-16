@@ -92,23 +92,26 @@ def main():
 
     positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
     tags = ["(a)", "(b)", "(c)", "(d)"]
-    bins = np.linspace(0, 180, 37)
+    bins = np.linspace(0, 360, 37)
 
     model_data = {}
-    max_density = 0.0
+    max_pct = 0.0
 
     for m_code, _ in MODELS:
         lead_times_full = load_all_alarm_lead_times(m_code)
-        lead_times_disp = lead_times_full[lead_times_full <= 180]
         true_median = float(np.median(lead_times_full)) if len(lead_times_full) > 0 else 0.0
-        
-        counts, _ = np.histogram(lead_times_disp, bins=bins, density=True)
-        if len(counts) > 0 and counts.max() > max_density:
-            max_density = counts.max()
-            
-        model_data[m_code] = {"full": lead_times_full, "disp": lead_times_disp, "median": true_median}
 
-    y_limit = max(0.045, np.ceil(max_density * 100) / 100 + 0.005)
+        counts, _ = np.histogram(lead_times_full, bins=bins)
+        if len(lead_times_full) > 0:
+            pct = counts / len(lead_times_full) * 100.0
+            over_pct = (lead_times_full > 360).sum() / len(lead_times_full) * 100.0
+            max_pct = max(max_pct, pct.max(), over_pct)
+
+        model_data[m_code] = {"full": lead_times_full, "median": true_median}
+
+    # Headroom above the tallest bar so the upper-right legend never overlaps
+    # the overflow bar at the axis edge.
+    y_limit = np.ceil(max_pct) + 4.0
 
     for idx, (m_code, m_title) in enumerate(MODELS):
         r, c = positions[idx]
@@ -117,38 +120,45 @@ def main():
         data = model_data[m_code]
 
         lead_times_full = data["full"]
-        lead_times_display = data["disp"]
         true_median_lt = data["median"]
 
-        if len(lead_times_display) > 0:
-            ax.hist(
-                lead_times_display,
-                bins=bins,
-                density=True,
-                facecolor=style["fill"],
-                edgecolor=style["edge"],
-                alpha=0.72,
-                linewidth=0.9,
-                label="Density Hist"
+        if len(lead_times_full) > 0:
+            counts, edges = np.histogram(lead_times_full, bins=bins)
+            pct = counts / len(lead_times_full) * 100.0
+            over_pct = (lead_times_full > 360).sum() / len(lead_times_full) * 100.0
+            ax.bar(
+                edges[:-1], pct, width=np.diff(edges), align="edge",
+                facecolor=style["fill"], edgecolor=style["edge"],
+                alpha=0.72, linewidth=0.9
+            )
+            # Lead times beyond the axis are pooled into one hatched overflow
+            # bar, so displayed bars always sum to 100% of the samples that the
+            # median line is computed on.
+            ax.bar(
+                366, over_pct, width=18, align="edge",
+                facecolor=style["fill"], edgecolor=style["edge"],
+                alpha=0.45, linewidth=0.9, hatch="//"
             )
 
         ax.axvline(
             true_median_lt,
             color=style["median"],
             linestyle="--",
-            linewidth=2.4,
+            linewidth=2.0,
             zorder=5,
-            label=f"Median: {true_median_lt:.1f} days"
+            label=f"Median (per-alarm): {true_median_lt:.1f} days"
         )
+        ax.axvline(30, color="#444444", linestyle=":", linewidth=1.6, zorder=4, label="H = 30 days")
 
         ax.set_title(f"{tags[idx]} {m_title}  (n = {len(lead_times_full)})", fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111")
         if c == 0:
-            ax.set_ylabel("Probability Density", fontsize=11, fontweight="bold", labelpad=6)
+            ax.set_ylabel("Frequency (%)", fontsize=11, fontweight="bold", labelpad=6)
         else:
             ax.set_ylabel("")
 
-        ax.set_xlim(0, 180)
-        ax.set_xticks(np.arange(0, 181, 30))
+        ax.set_xlim(0, 390)
+        ax.set_xticks(list(np.arange(0, 301, 60)) + [375])
+        ax.set_xticklabels([str(v) for v in np.arange(0, 301, 60)] + [">360"])
         ax.set_ylim(0, y_limit)
 
         ax.label_outer()
@@ -158,11 +168,7 @@ def main():
         ax.grid(False, axis="x")
         sns.despine(ax=ax, top=True, right=True)
 
-        handles, labels_leg = ax.get_legend_handles_labels()
-        sel = [i for i, l in enumerate(labels_leg) if "Median" in l]
         ax.legend(
-            [handles[i] for i in sel],
-            [labels_leg[i] for i in sel],
             loc="upper right",
             frameon=True,
             facecolor="#ffffff",

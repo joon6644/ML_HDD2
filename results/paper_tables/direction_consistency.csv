@@ -1,0 +1,5 @@
+﻿check,runs,cells_all_consistent,worst_cell
+RQ1  disk FAR > row FAR  (@tau_row),360/360,12/12,-
+RQ2  disk FAR falls      (tau_op < tau_row),360/360,12/12,-
+RQ2  disk Precision rises,360/360,12/12,-
+RQ2  Median LT falls,360/360,12/12,-

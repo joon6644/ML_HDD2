@@ -62,7 +62,7 @@ def main():
         model_data[m_code] = days
         model_total_failed[m_code] = total_failed
 
-    max_days = 365
+    max_days = 360
     bins = np.linspace(0, max_days, 37)
 
     for idx, (m_code, m_title) in enumerate(MODELS):
@@ -74,35 +74,57 @@ def main():
         total_failed = model_total_failed[m_code]
 
         if n_disks > 0:
-            sns.histplot(
-                x=days,
-                bins=bins,
-                stat="percent",
-                kde=False,
-                color=style["fill"],
-                edgecolor=style["edge"],
-                alpha=0.72,
-                linewidth=0.9,
-                ax=ax
+            counts, edges = np.histogram(days, bins=bins)
+            pct = counts / len(days) * 100.0
+            over_pct = (days > 360).sum() / len(days) * 100.0
+            ax.bar(
+                edges[:-1], pct, width=np.diff(edges), align="edge",
+                facecolor=style["fill"], edgecolor=style["edge"],
+                alpha=0.72, linewidth=0.9
+            )
+            # Lead times beyond the axis are pooled into one hatched overflow
+            # bar, so displayed bars always sum to 100% of the samples that the
+            # median line is computed on.
+            ax.bar(
+                366, over_pct, width=18, align="edge",
+                facecolor=style["fill"], edgecolor=style["edge"],
+                alpha=0.45, linewidth=0.9, hatch="//"
             )
             median_val = np.median(days)
-            ax.axvline(median_val, color="#d95f02", linestyle="--", linewidth=1.5, label=f"Median: {median_val:.1f}d")
-            ax.legend(loc="upper right", frameon=True, fontsize=10)
+            ax.axvline(
+                median_val,
+                color="#d9534f",
+                linestyle="--",
+                linewidth=2.0,
+                zorder=5,
+                label=f"Median (per-disk): {median_val:.1f} days"
+            )
+            ax.axvline(30, color="#444444", linestyle=":", linewidth=1.6, zorder=4, label="H = 30 days")
+            ax.legend(
+                loc="upper right",
+                frameon=True,
+                facecolor="#ffffff",
+                edgecolor="#cccccc",
+                framealpha=0.95,
+                fontsize=10.5
+            )
 
         ax.set_title(
             f"{labels[idx]} {m_title}  (n = {n_disks})",
             fontsize=13, fontweight="bold", pad=10, loc="left", color="#111111"
         )
 
-        ax.set_xlabel("Days to Failure at Alarm (Days)", fontsize=11, fontweight="bold", labelpad=6)
+        ax.set_xlabel("Lead Time (Days)", fontsize=11, fontweight="bold", labelpad=6)
         if c == 0:
             ax.set_ylabel("Frequency (%)", fontsize=11, fontweight="bold", labelpad=6)
         else:
             ax.set_ylabel("")
 
-        ax.set_xlim(0, max_days)
+        ax.set_xlim(0, 390)
+        ax.set_xticks(list(np.arange(0, 301, 60)) + [375])
+        ax.set_xticklabels([str(v) for v in np.arange(0, 301, 60)] + [">360"])
         ax.label_outer()
-        ax.set_xlabel("Days to Failure at Alarm (Days)", fontsize=11, fontweight="bold", labelpad=6)
+        ax.set_xlabel("Lead Time (Days)", fontsize=11, fontweight="bold", labelpad=6)
 
         ax.grid(True, axis="y", linestyle=":", alpha=0.20, color="#666666")
         ax.grid(False, axis="x")

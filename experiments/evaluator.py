@@ -250,30 +250,41 @@ class RollingEvaluator:
             })
         return raw_preds
 
-    def find_best_threshold_proposed_level(self, raw_preds, max_eap=None, max_far=None, lead_time=None):
+    def find_best_threshold_disk_level(self, raw_preds, max_far=None, lead_time=None):
         """
-        Finds the minimum threshold that satisfies Disk-level EAP (Early Alarm
-        Proportion) <= max_eap on validation predictions.
+        Finds the minimum threshold that satisfies Disk-level FAR <= max_far on
+        validation predictions, where
 
-        If NO threshold on the grid satisfies the EAP constraint, the constraint is
-        infeasible for this model/dataset (observed for HGST/LGBM, whose skewed
-        probability output never drives EAP below 1%). That is a documented outcome,
-        not an error: the threshold minimizing EAP (ties broken by higher ODR) is
-        returned and a prominent notice is emitted so the run is never silently
-        reported as constraint-satisfying.
+            Disk-level FAR = N_censored_early / N_censored
+
+        i.e. the share of right-censored HDDs that raise an alarm inside their
+        evaluable window. This is the disk-unit counterpart of the row-level FAR
+        constraint (both are rates over the negative population), so the Row-opt vs
+        Disk-opt comparison isolates the evaluation unit rather than mixing in a
+        different constraint definition. See METRIC_DESIGN.md section 5.
+
+        Early alarms on HDDs that DO fail are not part of this constraint -- they are
+        a positive-population outcome and are charged to Recall and Precision instead.
+
+        If NO threshold on the grid satisfies the constraint, it is infeasible for
+        this model/dataset. That is a documented outcome, not an error: the threshold
+        minimizing FAR (ties broken by higher Recall) is returned and a prominent
+        notice is emitted so the run is never silently reported as
+        constraint-satisfying.
+
+        Returns (threshold, disk_level_recall_at_that_threshold).
         """
-        if max_eap is None:
-            max_eap = config.MAX_EAP
+        if max_far is None:
+            max_far = config.MAX_DISK_FAR
         if lead_time is None:
             lead_time = config.TARGET_LEAD_TIME
 
-        total_disks = len(raw_preds)
-        if total_disks == 0:
+        if len(raw_preds) == 0:
             raise ValueError("[Threshold Search] Disk-level threshold search received zero disks.")
 
         infeasible_threshold = None
-        infeasible_min_eap = 2.0
-        infeasible_odr = -1.0
+        infeasible_min_far = 2.0
+        infeasible_recall = -1.0
 
         for thresh in THRESHOLD_GRID:
             n_ontime, n_early, n_missed, n_cens_early, n_cens_no_alarm = 0, 0, 0, 0, 0
@@ -282,7 +293,7 @@ class RollingEvaluator:
                 preds = disk['preds']
                 alarm_mask = (preds >= thresh)
                 alarm_triggered = np.any(alarm_mask)
-                
+
                 if has_failed:
                     if alarm_triggered:
                         first_alarm_idx = np.where(alarm_mask)[0][0]
@@ -302,25 +313,31 @@ class RollingEvaluator:
                         n_cens_no_alarm += 1
 
             n_failed = n_ontime + n_early + n_missed
-            odr = float(n_ontime / n_failed) if n_failed > 0 else 0.0
-            eap = float((n_early + n_cens_early) / total_disks)
+            n_censored = n_cens_early + n_cens_no_alarm
+            if n_censored == 0:
+                raise ValueError(
+                    "[Threshold Search] The validation set contains no right-censored HDDs, "
+                    "so disk-level FAR is undefined."
+                )
+            recall = float(n_ontime / n_failed) if n_failed > 0 else 0.0
+            far = float(n_cens_early / n_censored)
 
-            if (eap < infeasible_min_eap) or (eap == infeasible_min_eap and odr > infeasible_odr):
-                infeasible_min_eap = eap
-                infeasible_odr = odr
+            if (far < infeasible_min_far) or (far == infeasible_min_far and recall > infeasible_recall):
+                infeasible_min_far = far
+                infeasible_recall = recall
                 infeasible_threshold = thresh
 
-            # Return the MINIMUM threshold satisfying EAP <= max_eap constraint
-            if eap <= max_eap:
-                return float(thresh), float(odr)
+            # Return the MINIMUM threshold satisfying the FAR constraint
+            if far <= max_far:
+                return float(thresh), float(recall)
 
         print("!" * 80)
-        print(f"[CONSTRAINT INFEASIBLE] No threshold on the grid satisfies Disk-level EAP <= {max_eap:.4f}.")
-        print(f"  Minimum achievable validation EAP = {infeasible_min_eap:.6f} at threshold {infeasible_threshold:.3f}.")
+        print(f"[CONSTRAINT INFEASIBLE] No threshold on the grid satisfies Disk-level FAR <= {max_far:.4f}.")
+        print(f"  Minimum achievable validation FAR = {infeasible_min_far:.6f} at threshold {infeasible_threshold:.3f}.")
         print(f"  Falling back to that best-achievable threshold. The reported run does NOT satisfy")
-        print(f"  the EAP constraint stated in the experiment design -- report it as such.")
+        print(f"  the FAR constraint stated in the experiment design -- report it as such.")
         print("!" * 80)
-        return float(infeasible_threshold), float(infeasible_odr)
+        return float(infeasible_threshold), float(infeasible_recall)
 
     def evaluate_proposed_level(self, raw_preds, threshold, lead_time=None):
         """
@@ -332,10 +349,17 @@ class RollingEvaluator:
         - Censored Early: Right-censored HDD with alarm
         - Censored No Alarm: Right-censored HDD with no alarm
 
-        Operational Metrics:
-        - OAP = N_ontime / (N_ontime + N_early)
-        - ODR = N_ontime / (N_ontime + N_early + N_missed)
-        - EAP = (N_early + N_cens_early) / Total_HDDs
+        Every metric's denominator is a single, stated population (METRIC_DESIGN.md):
+        - Recall    = O / (O + E + M)        over failure-observed HDDs
+        - Precision = O / (O + E + CE)       over HDDs that raised an alarm
+        - FAR       = CE / (CE + CN)         over right-censored HDDs
+        - Median Lead Time                   over failure-observed HDDs with an alarm
+        - On-time share = O / (O + E)        over failure-observed HDDs with an alarm
+
+        Early (E) is charged to Recall (missed the actionable window) and to Precision
+        (wasted maintenance action), but never to FAR: E comes from the positive
+        population, so counting it as a false alarm would put the same HDD in both the
+        positive and the negative denominator.
         """
         if lead_time is None:
             lead_time = config.TARGET_LEAD_TIME
@@ -409,64 +433,61 @@ class RollingEvaluator:
             })
             
         report_df = pd.DataFrame(records)
-        
-        total_disks = len(report_df)
-        hits = int(report_df['is_hit'].sum())                  # N_ontime
-        fp_early = int(report_df['is_fp_early'].sum())         # N_early
-        misses = int(report_df['is_miss'].sum())                # N_missed
-        fp_cens = int(report_df['is_fp_cens'].sum())           # N_cens_early
-        correct_rejections = int(report_df['is_correct_rejection'].sum()) # N_cens_no_alarm
-        
-        failed_disks = hits + fp_early + misses
-        censored_disks = fp_cens + correct_rejections
-        false_alarms = fp_early + fp_cens
-        
-        oap = float(hits / (hits + fp_early)) if (hits + fp_early) > 0 else 0.0
-        odr = float(hits / failed_disks) if failed_disks > 0 else 0.0
-        eap = float((fp_early + fp_cens) / total_disks) if total_disks > 0 else 0.0
 
-        precision = float(hits / (hits + false_alarms)) if (hits + false_alarms) > 0 else 0.0
-        recall = odr
-        far = float(fp_cens / censored_disks) if censored_disks > 0 else 0.0
+        n_ontime = int(report_df['is_hit'].sum())                          # O
+        n_early = int(report_df['is_fp_early'].sum())                      # E
+        n_missed = int(report_df['is_miss'].sum())                         # M
+        n_cens_early = int(report_df['is_fp_cens'].sum())                  # CE
+        n_cens_no_alarm = int(report_df['is_correct_rejection'].sum())     # CN
+
+        n_failed = n_ontime + n_early + n_missed          # failure-observed population
+        n_censored = n_cens_early + n_cens_no_alarm       # right-censored population
+        n_alarmed = n_ontime + n_early + n_cens_early     # HDDs that raised an alarm
+
+        if n_failed == 0:
+            raise ValueError("[Operational Evaluation] No failure-observed HDDs; Recall is undefined.")
+        if n_censored == 0:
+            raise ValueError("[Operational Evaluation] No right-censored HDDs; FAR is undefined.")
+
+        recall = float(n_ontime / n_failed)
+        far = float(n_cens_early / n_censored)
+        precision = float(n_ontime / n_alarmed) if n_alarmed > 0 else 0.0
         f1 = float(2 * precision * recall / (precision + recall)) if (precision + recall) > 0 else 0.0
+        # Share of detected failures whose alarm landed inside the horizon.
+        on_time_share = float(n_ontime / (n_ontime + n_early)) if (n_ontime + n_early) > 0 else 0.0
 
-        # Lead time calculation sampled over ALL failed disks where a first alarm exists (On time + Early)
-        all_alarm_failed_rows = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
-        lead_times = all_alarm_failed_rows['days_to_failure_at_alarm'].dropna().values
-        
+        # Lead time over failure-observed HDDs that raised an alarm (On-time + Early)
+        alarmed_failed = report_df[(report_df['has_failed'] == 1) & (report_df['alarm_triggered'] == 1)]
+        lead_times = alarmed_failed['days_to_failure_at_alarm'].dropna().values
+
         mean_lt = float(np.mean(lead_times)) if len(lead_times) > 0 else 0.0
         median_lt = float(np.median(lead_times)) if len(lead_times) > 0 else 0.0
         std_lt = float(np.std(lead_times)) if len(lead_times) > 0 else 0.0
 
-        edr_15_count = sum(1 for lt in lead_times if lt >= 15)
-        edr_15 = float(edr_15_count / failed_disks) if failed_disks > 0 else 0.0
-
         disk_metrics = {
-            'N_ontime': hits,
-            'N_early': fp_early,
-            'N_missed': misses,
-            'N_cens_early': fp_cens,
-            'N_cens_no_alarm': correct_rejections,
-            'oap': oap,
-            'odr': odr,
-            'eap': eap,
-            'tp': hits,
-            'fp': false_alarms,
-            'fp_early': fp_early,
-            'fp_cens': fp_cens,
-            'fn': misses,
-            'tn': correct_rejections,
+            # Raw contingency counts -- every metric below is derivable from these,
+            # so they are what the paper reports as source data.
+            'N_ontime': n_ontime,
+            'N_early': n_early,
+            'N_missed': n_missed,
+            'N_cens_early': n_cens_early,
+            'N_cens_no_alarm': n_cens_no_alarm,
+            # Population sizes, needed to read the rates' precision
+            'N_failed': n_failed,
+            'N_censored': n_censored,
+            'N_alarmed': n_alarmed,
+            # Rates, each over the single population named in the docstring
             'precision': precision,
             'recall': recall,
             'f1': f1,
             'far': far,
+            'on_time_share': on_time_share,
             'threshold': float(threshold),
             'median_lead_time': median_lt,
             'mean_lead_time': mean_lt,
             'std_lead_time': std_lt,
-            'edr_15': edr_15
         }
-        
+
         return disk_metrics, report_df
 
 
@@ -474,32 +495,46 @@ class RollingEvaluator:
 # Result Persistence
 #
 # SINGLE SOURCE OF TRUTH: results/experiments.db (SQLite).
-# The master CSV files are a derived export, regenerated from the DB after every
-# write. Never read results back from the CSV -- read the DB.
+# CSV exports are derived, regenerated from the DB after every write. Never read
+# results back from a CSV -- read the DB.
+#
+# Three normalized tables. `split` and `threshold_kind` are DATA, not column-name
+# suffixes, so adding an evaluation scenario never widens the schema:
+#
+#   runs        one row per (dataset, model, seed): both chosen thresholds, the
+#               validation constraint value each one achieved, and whether the
+#               constraint was satisfiable at all
+#   row_level   row-unit metrics, keyed by (run, split, threshold_kind)
+#   disk_level  operational metrics + the 5 outcome counts, same key
+#
+# Scenario -> query:
+#   기존 Row 평가 재현        row_level  split='test'  threshold_kind='row_opt'
+#   기존 임곗값의 운영 적용   disk_level split='test'  threshold_kind='row_opt'
+#   운영 기반 최적화          disk_level split='test'  threshold_kind='disk_opt'
+#   검증셋 기록               either table, split='val'
 # ------------------------------------------------------------------------------
 CSV_ENCODING = 'utf-8-sig'
 
-# master CSV basename -> authoritative SQLite table
-_TABLE_BY_CSV_KEYWORD = (
-    ('row', 'master_row_threshold_results'),
-    ('proposed', 'master_proposed_threshold_results'),
-)
+RUNS_TABLE = 'runs'
+ROW_LEVEL_TABLE = 'row_level'
+DISK_LEVEL_TABLE = 'disk_level'
 
+RUN_KEY = ['dataset', 'model', 'seed']
+METRIC_KEY = RUN_KEY + ['split', 'threshold_kind']
 
-def resolve_table_name(master_csv_path: str) -> str:
-    """Map a master CSV path to its authoritative SQLite table."""
-    filename = os.path.basename(master_csv_path)
-    for keyword, table in _TABLE_BY_CSV_KEYWORD:
-        if keyword in filename:
-            return table
-    raise ValueError(
-        f"[Result Persistence] Cannot determine the SQLite table for '{filename}'. "
-        f"Expected the filename to contain one of: {[k for k, _ in _TABLE_BY_CSV_KEYWORD]}."
-    )
+RESULT_TABLES = {
+    RUNS_TABLE: RUN_KEY,
+    ROW_LEVEL_TABLE: METRIC_KEY,
+    DISK_LEVEL_TABLE: METRIC_KEY,
+}
 
 
 def get_db_path(results_dir: str) -> str:
     return os.path.join(results_dir, "experiments.db")
+
+
+def csv_export_path(results_dir: str, table_name: str) -> str:
+    return os.path.join(results_dir, f"{table_name}.csv")
 
 
 def _normalize_key_val(val):
@@ -541,49 +576,60 @@ def read_results_table(db_path: str, table_name: str) -> pd.DataFrame:
         return pd.read_sql(f"SELECT * FROM [{table_name}]", conn)
 
 
-def save_experiment_result_to_sqlite(db_path: str, table_name: str, row_data: dict, key_cols: list) -> pd.DataFrame:
+def save_rows(db_path: str, table_name: str, rows: list) -> pd.DataFrame:
     """
-    Saves or updates an experiment result in the authoritative SQLite database,
-    replacing any existing row with the same key. Returns the full updated table.
+    Insert or replace rows in one authoritative table, keyed by that table's key
+    columns. Returns the full updated table.
 
     No try/except: a failed write means results were lost, which must stop the run
-    rather than print a warning that scrolls past in a 156-run batch.
+    rather than print a warning that scrolls past in a long batch.
     """
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    df_row = pd.DataFrame([row_data])
+    if table_name not in RESULT_TABLES:
+        raise ValueError(f"[Result Persistence] Unknown table '{table_name}'. Known: {list(RESULT_TABLES)}")
+    if not rows:
+        raise ValueError(f"[Result Persistence] No rows supplied for '{table_name}'.")
 
-    df_existing = read_results_table(db_path, table_name)
-    df_final = df_row if df_existing.empty else _clean_and_dedup_rows(df_existing, df_row, key_cols)
+    key_cols = RESULT_TABLES[table_name]
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+
+    df_final = read_results_table(db_path, table_name)
+    for row in rows:
+        missing = [c for c in key_cols if c not in row]
+        if missing:
+            raise ValueError(f"[Result Persistence] Row for '{table_name}' is missing key column(s) {missing}.")
+        df_row = pd.DataFrame([row])
+        df_final = df_row if df_final.empty else _clean_and_dedup_rows(df_final, df_row, key_cols)
 
     with sqlite3.connect(db_path, timeout=30.0) as conn:
         df_final.to_sql(table_name, conn, if_exists='replace', index=False)
-    print(f"[RESULT LOG] Updated SQLite DB table '{table_name}': {db_path}")
     return df_final
 
 
-def export_results_table_to_csv(df: pd.DataFrame, master_csv_path: str):
-    """Export an authoritative results table to its derived master CSV.
+def export_results_table_to_csv(df: pd.DataFrame, csv_path: str):
+    """Export an authoritative results table to its derived CSV.
 
     A locked CSV (Excel holding the file open) is a hard error: silently diverting
     to a '.backup.csv' used to leave two files that disagree about the results.
     """
     try:
-        df.to_csv(master_csv_path, index=False, encoding=CSV_ENCODING)
+        df.to_csv(csv_path, index=False, encoding=CSV_ENCODING)
     except PermissionError as e:
         raise PermissionError(
-            f"[Result Persistence] Cannot write '{master_csv_path}' -- the file is locked "
+            f"[Result Persistence] Cannot write '{csv_path}' -- the file is locked "
             f"(most likely open in Excel). The result IS safely stored in the SQLite DB; close the "
             f"file and re-export. Refusing to write a divergent backup copy."
         ) from e
-    print(f"[RESULT LOG] Exported master CSV: {master_csv_path}")
 
 
-def save_experiment_result_to_csv(master_csv_path: str, row_data: dict, key_cols: list):
-    """Record one experiment result: write to the SQLite source of truth, then
-    regenerate the derived master CSV from it."""
-    results_dir = os.path.dirname(master_csv_path)
+def save_run_results(results_dir: str, run_row: dict, row_level_rows: list, disk_level_rows: list):
+    """Record one (dataset, model, seed) run across all three tables, then refresh
+    each table's derived CSV export."""
     os.makedirs(results_dir, exist_ok=True)
+    db_path = get_db_path(results_dir)
 
-    table_name = resolve_table_name(master_csv_path)
-    df_final = save_experiment_result_to_sqlite(get_db_path(results_dir), table_name, row_data, key_cols)
-    export_results_table_to_csv(df_final, master_csv_path)
+    for table, rows in ((RUNS_TABLE, [run_row]),
+                        (ROW_LEVEL_TABLE, row_level_rows),
+                        (DISK_LEVEL_TABLE, disk_level_rows)):
+        df = save_rows(db_path, table, rows)
+        export_results_table_to_csv(df, csv_export_path(results_dir, table))
+        print(f"[RESULT LOG] {table}: {len(df)} rows -> DB + CSV export")

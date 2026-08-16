@@ -1,0 +1,5 @@
+﻿model,n_failed,all_Missed,alarmed_but_never_On_time,never_On_time,any_On_time,all_On_time,median_On_time_count_among_detected
+LightGBM,162,76,35,111,51,0,5.0
+XGBoost,162,80,38,118,44,0,5.0
+LSTM,162,72,37,109,53,3,5.0
+GRU,162,84,35,119,43,6,12.0

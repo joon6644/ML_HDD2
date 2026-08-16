@@ -33,13 +33,11 @@ MODEL_COLORS = {
 def load_operational_false_alarm_data(model_code: str) -> np.ndarray:
     df = load_alarm_report(HDD_NAME, model_code, seed=SEED)
     
-    # 1. Censored Early (Healthy HDD False Alarms)
-    healthy_fa = df[(df['has_failed'] == 0) & (df['alarm_triggered'] == 1)]
-    # 2. Early False Alarms (Failed HDD > 30d before failure)
-    failed_early_fa = df[(df['has_failed'] == 1) & (df['alarm_triggered'] == 1) & (df['days_to_failure_at_alarm'] > 30)]
-    
-    combined_fa = pd.concat([healthy_fa, failed_early_fa], ignore_index=True)
-    days_since = combined_fa['days_since_observed'].dropna().values
+    # HDD-level FAR population: Censored Early only. Early alarms on failed
+    # HDDs are not false alarms under the operational FAR definition; they
+    # are penalized through Recall/Precision instead (METRIC_DESIGN.md).
+    censored_fa = df[(df['has_failed'] == 0) & (df['alarm_triggered'] == 1)]
+    days_since = censored_fa['days_since_observed'].dropna().values
     return days_since[days_since >= 0]
 
 
@@ -105,17 +103,12 @@ def main():
     plt.tight_layout(rect=[0, 0, 1, 0.95])
 
     out_path = os.path.join(RESULTS_DIR, "seed42_false_alarm_timeline_1d.png")
-    out_path_grid = os.path.join(RESULTS_DIR, "seed42_false_alarm_dot_plot_grid.png")
-    out_path_alt = os.path.join(RESULTS_DIR, "HGST_20HUH721212ALN604_false_alarm_dots_2x2.png")
-    
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
-    plt.savefig(out_path_grid, dpi=300, bbox_inches="tight")
-    plt.savefig(out_path_alt, dpi=300, bbox_inches="tight")
     plt.close()
 
     print("=" * 80)
     print(" [SUCCESS] Clean Unified 1D False Alarm Timeline Generated!")
-    print(f" Saved to:\n  -> {out_path}\n  -> {out_path_grid}")
+    print(f" Saved to: {out_path}")
     print("=" * 80)
 
 

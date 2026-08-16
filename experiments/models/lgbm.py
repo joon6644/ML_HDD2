@@ -16,6 +16,14 @@ HYPERPARAMS = {
     # minority-class ranking directly, so it doesn't false-plateau the same way.
     'metric': 'average_precision',
     'min_data_in_leaf': 100,
+    # Stochastic regularization, matching the level applied to the other models
+    # (XGBoost: subsample 0.9 / colsample_bytree 0.9, LSTM & GRU: dropout 0.2).
+    # Both libraries default these to 1.0, so leaving LightGBM at the default while
+    # XGBoost subsamples would regularize only one of the two GBDTs.
+    # bagging_freq must be >= 1 or LightGBM ignores bagging_fraction entirely.
+    'bagging_fraction': 0.9,
+    'bagging_freq': 1,
+    'feature_fraction': 0.9,
     'num_boost_round': 300,
     'early_stopping_rounds': 20
 }
@@ -55,7 +63,10 @@ def train_lgbm_model(X_train, y_train, X_val=None, y_val=None,
         'scale_pos_weight': scale_pos_weight,
         'seed': seed,
         'device': 'gpu' if use_gpu else 'cpu',
-        'min_data_in_leaf': hp['min_data_in_leaf']
+        'min_data_in_leaf': hp['min_data_in_leaf'],
+        'bagging_fraction': hp['bagging_fraction'],
+        'bagging_freq': hp['bagging_freq'],
+        'feature_fraction': hp['feature_fraction']
     }
 
     # FIX: valid_sets must NOT include train_data when val is available.

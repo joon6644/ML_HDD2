@@ -17,13 +17,19 @@ from data_loader import load_dataset, create_binary_target, build_sequences
 from imbalance import apply_imbalance_treatment, validate_config_compatibility
 from checkpoint_utils import load_checkpoint, save_checkpoint
 from models import train_rf_model, train_lgbm_model, train_xgb_model, train_mlp_model, train_lstm_model, train_gru_model
+import prediction_cache
 from evaluator import (
     RollingEvaluator,
     find_best_threshold_row_level,
     calculate_row_level_metrics,
-    save_experiment_result_to_csv,
+    save_run_results,
     read_results_table,
-    get_db_path
+    export_results_table_to_csv,
+    csv_export_path,
+    get_db_path,
+    THRESHOLD_GRID,
+    RESULT_TABLES,
+    RUNS_TABLE,
 )
 
 # ------------------------------------------------------------------------------
@@ -46,9 +52,9 @@ import sqlite3
 
 def is_experiment_already_completed(results_dir: str, model_name: str, dataset_name: str, seed: int) -> bool:
     """
-    Checks whether an experiment (Model, 데이터, Seed) is already recorded in the
-    authoritative SQLite DB. The master CSVs are a derived export and are never
-    consulted here -- one source of truth decides what has been run.
+    Checks whether a run is already recorded in the authoritative SQLite DB. The CSV
+    exports are derived and are never consulted here -- one source of truth decides
+    what has been run.
 
     A missing DB/table means 'nothing recorded yet'; a malformed one propagates
     rather than being silently treated as 'not completed' (which would quietly
@@ -58,14 +64,14 @@ def is_experiment_already_completed(results_dir: str, model_name: str, dataset_n
     model_norm = model_name.upper()
     ds_norm = os.path.basename(dataset_name)
 
-    for table in ('master_row_threshold_results', 'master_proposed_threshold_results'):
+    for table in RESULT_TABLES:
         df = read_results_table(db_path, table)
         if df.empty:
             return False
         match = (
-            (df['Model'].astype(str).str.upper() == model_norm)
-            & (df['데이터'].astype(str) == ds_norm)
-            & (df['Seed'].astype(int) == int(seed))
+            (df['model'].astype(str).str.upper() == model_norm)
+            & (df['dataset'].astype(str) == ds_norm)
+            & (df['seed'].astype(int) == int(seed))
         )
         if not match.any():
             return False
@@ -73,23 +79,20 @@ def is_experiment_already_completed(results_dir: str, model_name: str, dataset_n
     return True
 
 
-def reset_master_results(results_dir: str, reset_row: bool = False):
+def reset_master_results(results_dir: str):
     """
-    Resets/removes existing master CSV result files and SQLite tables for fresh accumulation.
+    Drops every result table and its derived CSV export so results accumulate from
+    scratch. Prediction caches are left alone -- they are keyed by run and are
+    overwritten as each run is recomputed.
     """
-    proposed_csv = os.path.join(results_dir, "master_proposed_threshold_results.csv")
-    row_csv = os.path.join(results_dir, "master_row_threshold_results.csv")
     db_path = get_db_path(results_dir)
 
-    targets = [proposed_csv]
-    if reset_row:
-        targets.append(row_csv)
-
     print("\n" + "=" * 80)
-    print(" [RESET MEMORY] Dropping existing result tables and their CSV exports")
+    print(" [RESET] Dropping every result table and its CSV export")
     # A reset that only half-succeeds leaves stale rows that later look like real
     # results, so any failure here stops the run instead of printing a warning.
-    for path in targets:
+    for table in RESULT_TABLES:
+        path = csv_export_path(results_dir, table)
         if os.path.exists(path):
             os.remove(path)
             print(f"  -> Removed derived CSV export: {path}")
@@ -97,11 +100,10 @@ def reset_master_results(results_dir: str, reset_row: bool = False):
     if os.path.exists(db_path):
         with sqlite3.connect(db_path, timeout=10.0) as conn:
             cursor = conn.cursor()
-            cursor.execute("DROP TABLE IF EXISTS master_proposed_threshold_results")
-            if reset_row:
-                cursor.execute("DROP TABLE IF EXISTS master_row_threshold_results")
+            for table in RESULT_TABLES:
+                cursor.execute(f"DROP TABLE IF EXISTS [{table}]")
             conn.commit()
-            print(f"  -> Dropped SQLite table(s) from {db_path}")
+            print(f"  -> Dropped tables {list(RESULT_TABLES)} from {db_path}")
     print("=" * 80 + "\n")
 
 
@@ -112,8 +114,7 @@ def run_unified_threshold_experiments():
     parser.add_argument('--models', type=str, nargs='+', default=config.ALL_MODELS, help='Target model names')
     parser.add_argument('--imbalance', type=str, default='none', help='Imbalance strategy')
     parser.add_argument('--drop-failure-day', action='store_true', default=config.DROP_FAILURE_DAY_IN_TRAIN, help='Drop failure day in train')
-    parser.add_argument('--reset', action='store_true', default=False, help='Reset/clear existing master CSV result files before running')
-    parser.add_argument('--reset-row', action='store_true', default=False, help='Also reset row threshold result files/tables')
+    parser.add_argument('--reset', action='store_true', default=False, help='Drop every result table and its CSV export before running')
     parser.add_argument('--dry-run', action='store_true', help='Print planned tasks without execution')
     parser.add_argument('--eval-only', '--inference-only', action='store_true', default=False, help='Run inference and threshold evaluation only using pre-saved model checkpoints (do not retrain and do not skip existing results)')
     parser.add_argument('--overwrite', '--force-eval', action='store_true', default=False, help='Force re-evaluation and overwrite existing results for specified dataset/model/seed without running full reset')
@@ -132,13 +133,9 @@ def run_unified_threshold_experiments():
         print(r"    .\venv\Scripts\python.exe experiments\run_unified_threshold_experiments.py")
         print("!" * 80 + "\n")
 
-    master_row_csv_path = os.path.join(results_dir, "master_row_threshold_results.csv")
-    master_proposed_csv_path = os.path.join(results_dir, "master_proposed_threshold_results.csv")
-    key_cols = ['Model', '데이터', 'Seed']
-
-    # Reset existing memory/files ONLY if explicitly requested via --reset flag
+    # Reset existing results ONLY if explicitly requested via --reset flag
     if args.reset and not args.dry_run:
-        reset_master_results(results_dir, reset_row=args.reset_row)
+        reset_master_results(results_dir)
 
     # 1. Build planned task list (Loop Order: DATASET -> MODEL -> SEED for RAM caching & minimal I/O)
     tasks = []
@@ -164,8 +161,9 @@ def run_unified_threshold_experiments():
     print(f" Seeds ({len(args.seeds)})    : {args.seeds}")
     print(f" Eval Only / Overwrite: eval_only={args.eval_only}, overwrite={args.overwrite}")
     print(f" Total Planned Runs  : {len(tasks)}")
-    print(f" Output Master CSV 1 : {master_row_csv_path}")
-    print(f" Output Master CSV 2 : {master_proposed_csv_path}")
+    print(f" Result DB           : {get_db_path(results_dir)}")
+    print(f" Result tables       : {list(RESULT_TABLES)}")
+    print(f" Prediction cache    : {prediction_cache.CACHE_ROOT}")
     print("=" * 80)
 
     if args.dry_run:
@@ -244,7 +242,7 @@ def run_unified_threshold_experiments():
                     else:
                         X_tr_proc, y_tr_proc = apply_imbalance_treatment(X_train_2d, y_train, strategy=imbalance, seed=seed, dataset_path=data_path, lead_time=config.TARGET_LEAD_TIME, drop_failure_day=args.drop_failure_day)
                         if model_name == 'lgbm':
-                            model = train_lgbm_model(X_tr_proc, y_tr_proc, X_val_2d, y_val, seed=seed, use_gpu=config.USE_GPU)
+                            model = train_lgbm_model(X_tr_proc, y_tr_proc, X_val_2d, y_val, seed=seed, use_gpu=config.LGBM_USE_GPU)
                             model_type = 'lgbm'
                         elif model_name == 'xgb':
                             model = train_xgb_model(X_tr_proc, y_tr_proc, X_val_2d, y_val, seed=seed, use_gpu=config.USE_GPU)
@@ -263,77 +261,104 @@ def run_unified_threshold_experiments():
                     seed=seed
                 )
 
-                print("Performing single sequential inference on Validation set...")
-                raw_preds_val = evaluator.get_raw_predictions(val_df)
-                print("Performing single sequential inference on Test set...")
-                raw_preds_test = evaluator.get_raw_predictions(test_df)
+                splits = {}
+                for split_name, split_df in (('val', val_df), ('test', test_df)):
+                    print(f"Performing single sequential inference on {split_name.capitalize()} set...")
+                    raw = evaluator.get_raw_predictions(split_df)
+                    splits[split_name] = {
+                        'raw': raw,
+                        'probs': np.concatenate([d['preds'] for d in raw]),
+                        'y_true': np.concatenate([d['y_true'] for d in raw]),
+                    }
 
-                # Extract row-level arrays
-                val_probs = np.concatenate([d['preds'] for d in raw_preds_val])
-                val_y_true = np.concatenate([d['y_true'] for d in raw_preds_val])
-                test_probs = np.concatenate([d['preds'] for d in raw_preds_test])
-                test_y_true = np.concatenate([d['y_true'] for d in raw_preds_test])
+                # Cache the sufficient statistics so re-deriving thresholds, metrics or a
+                # different horizon H never needs inference again.
+                for split_name, s in splits.items():
+                    written = prediction_cache.save_all_layers(
+                        s['raw'], s['y_true'], s['probs'], THRESHOLD_GRID,
+                        ds, model_name, seed, split_name)
+                    print(f"[Cache] {split_name}: " + ", ".join(sorted(written)))
 
-                # D1. Row-Level Optimal Threshold Search & Evaluation
-                th_row, max_val_row_rec = find_best_threshold_row_level(val_y_true, val_probs, max_far=config.MAX_FAR)
-                print(f"[Row-Level Search] Best Threshold: {th_row:.4f} (Max Val Recall @ FAR <= 1%: {max_val_row_rec:.4%})")
+                # D1. Row-unit threshold: max Recall subject to row FAR <= MAX_FAR
+                th_row, val_row_recall = find_best_threshold_row_level(
+                    splits['val']['y_true'], splits['val']['probs'], max_far=config.MAX_FAR)
+                val_row_at_th_row = calculate_row_level_metrics(
+                    splits['val']['y_true'], splits['val']['probs'], threshold=th_row)
+                print(f"[Row-Level Search] Threshold {th_row:.4f} "
+                      f"(val Recall {val_row_recall:.4%} @ val FAR {val_row_at_th_row['far']:.4%})")
 
-                row_metrics = calculate_row_level_metrics(test_y_true, test_probs, threshold=th_row)
-                proposed_at_th_row, _ = evaluator.evaluate_proposed_level(raw_preds_test, threshold=th_row)
+                # D2. Disk-unit threshold: max Recall subject to disk FAR <= MAX_DISK_FAR
+                th_disk, val_disk_recall = evaluator.find_best_threshold_disk_level(
+                    splits['val']['raw'], max_far=config.MAX_DISK_FAR)
+                val_disk_at_th_disk, _ = evaluator.evaluate_proposed_level(
+                    splits['val']['raw'], threshold=th_disk)
+                print(f"[Disk-Level Search] Threshold {th_disk:.4f} "
+                      f"(val Recall {val_disk_recall:.4%} @ val FAR {val_disk_at_th_disk['far']:.4%})")
 
-                row_result_data = {
-                    'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'Model': model_name.upper(),
-                    '데이터': os.path.basename(ds),
-                    'Seed': seed,
-                    'Threshold (Row-Opt)': round(th_row, 4),
-                    'Row Precision': round(row_metrics['precision'], 4),
-                    'Row Recall': round(row_metrics['recall'], 4),
-                    'Row F1': round(row_metrics['f1'], 4),
-                    'Row PR-AUC': round(row_metrics['pr_auc'], 4),
-                    'Row FAR (%)': round(row_metrics['far'] * 100, 2),
-                    'Proposed Disk Precision': round(proposed_at_th_row['precision'], 4),
-                    'Proposed Disk Recall': round(proposed_at_th_row['recall'], 4),
-                    'Proposed Disk F1': round(proposed_at_th_row['f1'], 4),
-                    'Proposed Disk FAR (%)': round(proposed_at_th_row['far'] * 100, 2),
-                    'Proposed OAP': round(proposed_at_th_row['oap'], 4),
-                    'Proposed ODR': round(proposed_at_th_row['odr'], 4),
-                    'Proposed EAP (%)': round(proposed_at_th_row['eap'] * 100, 2),
-                    'Proposed Median LT': round(proposed_at_th_row['median_lead_time'], 2),
-                    'Proposed EDR@15': round(proposed_at_th_row['edr_15'], 4)
+                thresholds = {'row_opt': th_row, 'disk_opt': th_disk}
+
+                # Evaluate BOTH units at BOTH thresholds on BOTH splits.
+                row_level_rows, disk_level_rows = [], []
+                for split_name, s in splits.items():
+                    for kind, thr in thresholds.items():
+                        rm = calculate_row_level_metrics(s['y_true'], s['probs'], threshold=thr)
+                        dm, _ = evaluator.evaluate_proposed_level(s['raw'], threshold=thr)
+                        common = {
+                            'dataset': os.path.basename(ds),
+                            'model': model_name.upper(),
+                            'seed': seed,
+                            'split': split_name,
+                            'threshold_kind': kind,
+                            'threshold': round(thr, 4),
+                        }
+                        row_level_rows.append({
+                            **common,
+                            'precision': round(rm['precision'], 6),
+                            'recall': round(rm['recall'], 6),
+                            'f1': round(rm['f1'], 6),
+                            'far': round(rm['far'], 6),
+                            'auroc': round(rm['auroc'], 6),
+                            'tp': rm['tp'], 'fp': rm['fp'], 'fn': rm['fn'], 'tn': rm['tn'],
+                        })
+                        disk_level_rows.append({
+                            **common,
+                            'N_on_time': dm['N_ontime'],
+                            'N_early': dm['N_early'],
+                            'N_missed': dm['N_missed'],
+                            'N_censored_early': dm['N_cens_early'],
+                            'N_censored_no_alarm': dm['N_cens_no_alarm'],
+                            'N_failed': dm['N_failed'],
+                            'N_censored': dm['N_censored'],
+                            'N_alarmed': dm['N_alarmed'],
+                            'precision': round(dm['precision'], 6),
+                            'recall': round(dm['recall'], 6),
+                            'f1': round(dm['f1'], 6),
+                            'far': round(dm['far'], 6),
+                            'on_time_share': round(dm['on_time_share'], 6),
+                            'mean_lead_time': round(dm['mean_lead_time'], 2),
+                            'median_lead_time': round(dm['median_lead_time'], 2),
+                            'std_lead_time': round(dm['std_lead_time'], 2),
+                        })
+
+                run_row = {
+                    'dataset': os.path.basename(ds),
+                    'model': model_name.upper(),
+                    'seed': seed,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'lead_time_H': config.TARGET_LEAD_TIME,
+                    'n_features': len(features),
+                    'threshold_row_opt': round(th_row, 4),
+                    'threshold_disk_opt': round(th_disk, 4),
+                    'max_far_row': config.MAX_FAR,
+                    'max_far_disk': config.MAX_DISK_FAR,
+                    'val_far_row_opt': round(val_row_at_th_row['far'], 6),
+                    'val_far_disk_opt': round(val_disk_at_th_disk['far'], 6),
+                    # Whether each constraint was actually satisfiable on validation.
+                    'row_constraint_met': int(val_row_at_th_row['far'] <= config.MAX_FAR),
+                    'disk_constraint_met': int(val_disk_at_th_disk['far'] <= config.MAX_DISK_FAR),
                 }
-                save_experiment_result_to_csv(master_row_csv_path, row_result_data, key_cols)
 
-                # D2. Proposed Disk-Level Optimal Threshold Search & Evaluation (Max ODR @ EAP <= 1%)
-                th_proposed, max_val_odr = evaluator.find_best_threshold_proposed_level(raw_preds_val, max_eap=config.MAX_EAP)
-                print(f"[Proposed Disk Search] Best Threshold: {th_proposed:.4f} (Max Val ODR @ EAP <= 1%: {max_val_odr:.4%})")
-
-                proposed_at_th_proposed, _ = evaluator.evaluate_proposed_level(raw_preds_test, threshold=th_proposed)
-
-                proposed_result_data = {
-                    'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'Model': model_name.upper(),
-                    '데이터': os.path.basename(ds),
-                    'Seed': seed,
-                    'Threshold (Proposed-Opt)': round(th_proposed, 4),
-                    'OAP': round(proposed_at_th_proposed['oap'], 4),
-                    'ODR': round(proposed_at_th_proposed['odr'], 4),
-                    'EAP (%)': round(proposed_at_th_proposed['eap'] * 100, 2),
-                    'N_On_time': proposed_at_th_proposed['N_ontime'],
-                    'N_Early': proposed_at_th_proposed['N_early'],
-                    'N_Missed': proposed_at_th_proposed['N_missed'],
-                    'N_Censored_Early': proposed_at_th_proposed['N_cens_early'],
-                    'N_Censored_No_Alarm': proposed_at_th_proposed['N_cens_no_alarm'],
-                    'Disk Precision': round(proposed_at_th_proposed['precision'], 4),
-                    'Disk Recall': round(proposed_at_th_proposed['recall'], 4),
-                    'Disk F1': round(proposed_at_th_proposed['f1'], 4),
-                    'Disk FAR (%)': round(proposed_at_th_proposed['far'] * 100, 2),
-                    'Mean Lead Time': round(proposed_at_th_proposed['mean_lead_time'], 2),
-                    'Median Lead Time': round(proposed_at_th_proposed['median_lead_time'], 2),
-                    'Std Lead Time': round(proposed_at_th_proposed['std_lead_time'], 2),
-                    'EDR@15': round(proposed_at_th_proposed['edr_15'], 4)
-                }
-                save_experiment_result_to_csv(master_proposed_csv_path, proposed_result_data, key_cols)
+                save_run_results(results_dir, run_row, row_level_rows, disk_level_rows)
 
                 successful_runs += 1
 
@@ -361,8 +386,9 @@ def run_unified_threshold_experiments():
     print(f" Total Elapsed Time   : {elapsed / 60:.2f} minutes")
     print(f" Successful Runs      : {successful_runs} / {len(tasks)}")
     print(f" Failed Runs          : {failed_runs} / {len(tasks)}")
-    print(f" Master Row CSV       : {master_row_csv_path}")
-    print(f" Master Proposed CSV  : {master_proposed_csv_path}")
+    print(f" Result DB            : {get_db_path(results_dir)}")
+    for table in RESULT_TABLES:
+        print(f"   {table:12s} -> {csv_export_path(results_dir, table)}")
     print("=" * 80 + "\n")
 
     if failed_runs > 0:

@@ -1,0 +1,8 @@
+================================================================================
+ [SUCCESS] Operational False Alarm Timing Grid (Unified Color) Generated!
+  - LightGBM: Total FA = 39
+  - XGBoost : Total FA = 29
+  - LSTM    : Total FA = 62
+  - GRU     : Total FA = 58
+ Saved to: C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\seed42_healthy_hdd_false_alarm_timing_grid.png
+================================================================================
