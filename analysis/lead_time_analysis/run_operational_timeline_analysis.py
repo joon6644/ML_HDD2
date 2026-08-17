@@ -172,12 +172,11 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
     plt.rcParams['axes.linewidth'] = 1.1
 
     sns.set_theme(style="ticks", palette="muted")
-    fig, axes = plt.subplots(2, 2, figsize=(14, 9.2), dpi=300, sharey=True)
-
-    fig.suptitle(
-        f"Operational Life-Cycle Timelines across 4 Alarm Categories — {m_title} ({hdd_name})",
-        fontsize=15, fontweight="bold", y=0.98, color="#111111"
-    )
+    # Height is set by the tallest curve, not by the probability range: the peaks
+    # are 0.67 / 0.30 / 0.26 / 0.15, so an axis to 1.0 would leave the bottom
+    # third of the page carrying every line. No suptitle -- the paper's caption
+    # already names the figure, and repeating it here costs a full text line.
+    fig, axes = plt.subplots(2, 2, figsize=(14, 6.6), dpi=300, sharey=True)
 
     categories = [
         ('On-time', (0, 0), "(a) On-time Alarm"),
@@ -195,7 +194,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         if disk_data is None:
             ax.text(0.5, 0.5, f"No sample found for category: {key}", ha='center', va='center', fontsize=12)
             ax.set_title(title, fontsize=12.5, fontweight='bold', pad=9, loc='left', color='#111111')
-            ax.set_ylim(-0.02, 1.05)
+            ax.set_ylim(-0.02, 0.74)
             ax.set_ylabel("Prediction Probability" if c == 0 else "")
             sns.despine(ax=ax, top=True, right=True)
             continue
@@ -231,7 +230,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
             first_alarm_date = dates[first_alarm_idx]
             ax.axvline(
                 first_alarm_date, color="#e41a1c", linestyle=":", linewidth=1.5,
-                label=f"First Alarm Event ({first_alarm_date.strftime('%Y-%m-%d')})"
+                label="First Alarm"
             )
 
         # 3. Decision Threshold Line
@@ -244,7 +243,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         if has_failed and failure_date is not None:
             ax.axvline(
                 failure_date, color='#000000', linestyle='--', linewidth=1.5,
-                label=f"Actual Failure Event ({failure_date.strftime('%Y-%m-%d')})"
+                label="Actual Failure"
             )
 
         # Subplot Title
@@ -253,7 +252,7 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
             fontsize=12.5, fontweight='bold', pad=9, loc='left', color='#111111'
         )
 
-        ax.set_ylim(-0.02, 1.05)
+        ax.set_ylim(-0.02, 0.74)
 
         # Set 5 evenly spaced date ticks across the time range
         tick_indices = np.linspace(0, len(dates) - 1, 5, dtype=int)
@@ -273,11 +272,16 @@ def plot_operational_timelines(samples: dict, model_key: str, threshold: float, 
         ax.grid(False, axis="x")
         sns.despine(ax=ax, top=True, right=True)
 
-        if r == 0 and c == 0:
-            ax.legend(fontsize=9.0, loc='upper left', frameon=True, facecolor='#ffffff', edgecolor='#cccccc', framealpha=0.90)
+    # One shared legend under the grid. Per-panel dates are dropped from the
+    # labels: they differ by panel, and the body text already gives each
+    # interval, so keeping them forced a box into panel (a)'s headroom.
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower center', bbox_to_anchor=(0.5, -0.03),
+               ncol=4, fontsize=10.5, frameon=False, handlelength=1.8,
+               columnspacing=2.0)
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
-    plt.subplots_adjust(hspace=0.28)
+    plt.tight_layout()
+    plt.subplots_adjust(hspace=0.32)
 
     for out_path in output_paths:
         plt.savefig(out_path, dpi=300, bbox_inches='tight')

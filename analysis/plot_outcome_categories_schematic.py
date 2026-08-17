@@ -79,7 +79,7 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     # Korean labels match the terms the manuscript uses in prose; the outcome
     # names stay in English because that is how the manuscript defines them.
-    plt.rcParams["font.sans-serif"] = ["Malgun Gothic", "Noto Sans KR",
+    plt.rcParams["font.sans-serif"] = ["Arial", "Helvetica", "DejaVu Sans",
                                        "Arial", "DejaVu Sans", "sans-serif"]
     plt.rcParams["axes.unicode_minus"] = False
     # Computer Modern for the math only, so the symbols match how they are set
@@ -95,7 +95,7 @@ def main():
     # ---- shared reference: the end of the observation window -----------------
     ax.plot([T_OBS_END, T_OBS_END], [Y_CENSORED - 0.42, Y_FAILED + 0.46],
             color=COL_END, ls="--", lw=1.7, zorder=4)
-    ax.text(T_OBS_END, Y_FAILED + 0.50, "관측 종료($t_{\mathrm{end},d}$)", ha="center",
+    ax.text(T_OBS_END, Y_FAILED + 0.50, "Observation end ($t_{\mathrm{end},d}$)", ha="center",
             va="bottom", fontsize=10, fontweight="bold", color=COL_END)
 
     # ---- row 1: failure observed inside the window --------------------------
@@ -118,15 +118,15 @@ def main():
     # Only the assignable stretch gets a bracket: the bracket row is reserved
     # for category names, and the excluded stretch is not a category.
     _span(ax, T_START, T_H_CENSORED, Y_CENSORED, "Censored Early")
-    _cond(ax, T_START, T_H_CENSORED, Y_CENSORED, r"$LT_d > H$ 보장")
-    _cond(ax, T_H_CENSORED, T_OBS_END, Y_CENSORED, "평가 제외", color="#8a8a8a")
+    _cond(ax, T_START, T_H_CENSORED, Y_CENSORED, r"$LT_d > H$ guaranteed")
+    _cond(ax, T_H_CENSORED, T_OBS_END, Y_CENSORED, "Excluded", color="#8a8a8a")
     _tick(ax, T_H_CENSORED, Y_CENSORED, COL_BOUND, ":", 1.5)
     ax.text(T_H_CENSORED, Y_CENSORED - 0.30, r"$t_{\mathrm{end},d} - H$",
             ha="center", va="top", fontsize=9.5, color=COL_BOUND)
 
     for y, row_name, no_alarm in (
-        (Y_FAILED, "고장 관측 HDD", "Missed"),
-        (Y_CENSORED, "우측 중도절단 HDD", "Censored No Alarm"),
+        (Y_FAILED, "Failure-observed HDD", "Missed"),
+        (Y_CENSORED, "Right-censored HDD", "Censored No Alarm"),
     ):
         ax.text(T_START - 14, y, row_name, ha="right", va="center", fontsize=11,
                 fontweight="bold", color="#111111")
@@ -136,14 +136,14 @@ def main():
     ax.annotate("", xy=(T_OBS_END + 6, Y_CENSORED - 0.55),
                 xytext=(T_START, Y_CENSORED - 0.55),
                 arrowprops=dict(arrowstyle="->", color="#9a9a9a", lw=1.3))
-    ax.text(T_OBS_END + 6, Y_CENSORED - 0.62, "시간($t$)", ha="right", va="top",
+    ax.text(T_OBS_END + 6, Y_CENSORED - 0.62, "Time ($t$)", ha="right", va="top",
             fontsize=9, color="#9a9a9a")
 
     handles = [
         Line2D([], [], color=COL_ONTIME, lw=7.0,
-               label=f"On-time 구간 (고장 전 $H$일 이내, $H={H_DAYS}$일)"),
-        Line2D([], [], color=COL_LINE, lw=5.0, label="평가 대상 관측 이력"),
-        Line2D([], [], color=COL_EXCLUDE, lw=5.0, label="평가 제외 구간"),
+               label=f"On-time window (within $H$ days before failure, $H={H_DAYS}$)"),
+        Line2D([], [], color=COL_LINE, lw=5.0, label="Evaluated observation history"),
+        Line2D([], [], color=COL_EXCLUDE, lw=5.0, label="Excluded interval"),
     ]
     # The legend is centred on the timeline rather than on the axes, which
     # extends further right to hold the outcome column.
