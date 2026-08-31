@@ -2,6 +2,10 @@
 
 디스크 단위 판정이 이 프로젝트의 핵심 정의라 네 칸을 하나씩 다 확인한다.
 
+기본 규칙은 in_horizon 이다 (정답 구간 안에서 울리면 TP, 구간 밖 알람은
+판정을 바꾸지 않음). on_time 은 구간 밖 알람을 FP 로 강등하는 더 엄격한
+변형이고, or 는 시점을 아예 보지 않는 선행연구 표준 집계다.
+
     out        = horizon 밖(y=0 행) 알람 >= 1
     in         = horizon 안(y=1 행) 알람 >= 1
     has_window = 창 안에 y=1 행이 있는가
@@ -88,6 +92,74 @@ def test_brier_still_reported_for_probability_models():
         frame, 0.5, {"disk_level": {"rule": "on_time"}}, horizon_days=10, period=APRIL
     )["row_level"]
     assert row["brier"] == pytest.approx(0.01)
+
+
+# --------------------------------------------------------------------------
+# rule: in_horizon — 선언한 horizon 이 판정을 지배한다
+# --------------------------------------------------------------------------
+def _in_horizon(**kwargs) -> DiskLevelSpec:
+    return DiskLevelSpec(rule="in_horizon", period=APRIL, **kwargs)
+
+
+def _codes(frame, threshold=0.5, spec=None):
+    spec = spec or _in_horizon()
+    units = metrics.collapse_to_disks(frame, threshold, spec)
+    return dict(zip(units.index.get_level_values(0), metrics.outcome_codes(units, spec)))
+
+
+def test_in_horizon_alarm_inside_the_window_is_a_true_positive():
+    frame = _frame(
+        [("A", 0, 0, 0.10, pd.Timestamp("2023-04-08")),
+         ("A", 1, 1, 0.90, pd.Timestamp("2023-04-08"))]
+    )
+    assert _codes(frame)["A"] == metrics.TP
+
+
+def test_in_horizon_ignores_an_alarm_outside_the_window():
+    """구간 밖에서만 울리면 놓친 것이다. on_time 과 달리 FP 로 강등하지 않는다."""
+    frame = _frame(
+        [("A", 0, 0, 0.90, pd.Timestamp("2023-04-20")),   # horizon 밖 알람
+         ("A", 1, 1, 0.10, pd.Timestamp("2023-04-20"))]   # horizon 안, 조용
+    )
+    assert _codes(frame)["A"] == metrics.FN
+    # 같은 상황을 on_time 으로 보면 FP_EARLY 다.
+    spec = DiskLevelSpec(rule="on_time", period=APRIL)
+    assert _codes(frame, spec=spec)["A"] == metrics.FP_EARLY
+
+
+def test_in_horizon_early_alarm_does_not_cancel_a_correct_one():
+    """구간 밖에서도 울리고 안에서도 울렸으면 TP 다 (on_time 은 FP)."""
+    frame = _frame(
+        [("A", 0, 0, 0.90, pd.Timestamp("2023-04-20")),
+         ("A", 1, 1, 0.90, pd.Timestamp("2023-04-20"))]
+    )
+    assert _codes(frame)["A"] == metrics.TP
+    spec = DiskLevelSpec(rule="on_time", period=APRIL)
+    assert _codes(frame, spec=spec)["A"] == metrics.FP_EARLY
+
+
+def test_in_horizon_healthy_disk_that_alarms_is_a_false_positive():
+    frame = _frame([("A", 0, 0, 0.90, pd.NaT), ("A", 1, 0, 0.10, pd.NaT)])
+    assert _codes(frame)["A"] == metrics.FP_HEALTHY
+
+
+def test_in_horizon_quiet_healthy_disk_is_a_true_negative():
+    frame = _frame([("A", 0, 0, 0.10, pd.NaT), ("A", 1, 0, 0.20, pd.NaT)])
+    assert _codes(frame)["A"] == metrics.TN
+
+
+def test_in_horizon_rejects_a_window_shorter_than_the_horizon():
+    """창이 horizon 보다 짧으면 창 안 모든 행이 y=1 이라 규칙이 무너진다."""
+    with pytest.raises(ValueError, match="window_days"):
+        DiskLevelSpec.from_config(
+            {"disk_level": {"rule": "in_horizon", "window_days": 5}},
+            horizon_days=10, period=APRIL,
+        )
+
+
+def test_in_horizon_is_the_default_rule():
+    assert DiskLevelSpec().rule == "in_horizon"
+    assert DiskLevelSpec.from_config({}, horizon_days=10, period=APRIL).rule == "in_horizon"
 
 
 # --------------------------------------------------------------------------
@@ -322,9 +394,15 @@ def test_on_time_rule_rejects_a_window_at_or_below_the_horizon():
         )
 
 
-def test_default_config_is_on_time_over_the_whole_period():
+def test_default_config_is_in_horizon_over_the_whole_period():
+    """기본 판정은 in_horizon 이다.
+
+    선언한 horizon 이 학습 라벨과 판정에 같이 적용되어야 "H일 예측"이라는
+    선언과 채점이 일치한다. 창을 달력 한 달로 두고 아무 알람이나 인정하면
+    실제 인정 구간이 1~28일로 흩어진다.
+    """
     spec = DiskLevelSpec.from_config({}, horizon_days=10, period=APRIL)
-    assert spec.rule == "on_time"
+    assert spec.rule == "in_horizon"
     assert spec.window_days is None
 
 

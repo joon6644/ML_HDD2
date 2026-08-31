@@ -22,15 +22,18 @@
 #     음성) 과거 음성이 전부 남고 감축이 일어나지 않는다. 매 fold 의 실제
 #     표집 결과는 fold_metrics.json 의 sampling 에 기록된다.
 #
-# 판정 (configs/evaluation.yaml 의 rule: on_time):
+# 판정 (configs/evaluation.yaml 의 rule: in_horizon):
 #
 #   창 안에 고장 라벨이 있는 HDD
-#     horizon 밖에서 한 번이라도 울림          -> FP
-#     horizon 안에서 울리고 밖에서는 안 울림    -> TP
-#     아예 안 울림                             -> FN
+#     horizon 안(y=1 행)에서 한 번이라도 울림  -> TP
+#     그 구간에서 안 울림                      -> FN
+#     (구간 밖 알람은 판정을 바꾸지 않는다)
 #   우측 중도절단 HDD
 #     한 번이라도 울림                         -> FP
 #     아예 안 울림                             -> TN
+#
+#   선언한 horizon 이 학습 라벨과 판정에 같이 적용된다. 구간 밖 알람을 FP 로
+#   강등하는 더 엄격한 변형은 rule: on_time 이다.
 #
 # 검열은 창 기준이다 (labeling.censoring_scope: window). 각 창의 끝 10일은
 # 그 창 안에서 고장이 확인되지 않는 한 표본에서 빠진다. 그 달이 끝난 시점에
@@ -95,7 +98,7 @@ overrides:
   features.train_sampling.seed: 42
 
   # --- 판정 ---
-  evaluation.disk_level.rule: on_time
+  evaluation.disk_level.rule: in_horizon
   evaluation.disk_level.window_days: null
 
 output_root: "${project_root}/runs"

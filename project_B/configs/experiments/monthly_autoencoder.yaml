@@ -62,7 +62,7 @@ overrides:
   features.train_sampling.negative_stride: 7
 
   # --- 판정 ---
-  evaluation.disk_level.rule: on_time
+  evaluation.disk_level.rule: in_horizon
   evaluation.disk_level.window_days: null
 
 output_root: "${project_root}/runs"

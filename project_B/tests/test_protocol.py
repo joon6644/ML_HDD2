@@ -502,7 +502,7 @@ def test_monthly_experiment_config_is_consistent():
     assert overrides["split.allow_label_overlap"] is True
     assert overrides["labeling.horizon_days"] == 10
     assert overrides["labeling.censoring_scope"] == "window"
-    assert overrides["evaluation.disk_level.rule"] == "on_time"
+    assert overrides["evaluation.disk_level.rule"] == "in_horizon"
     assert overrides["features.train_sampling.strategy"] == "match_val"
     assert overrides["features.train_sampling.keep_recent_months"] == 1
     # 세 구간 모두 양성 하한이 걸려 있어야 "양성 0인 달은 건너뛴다"가 성립한다.

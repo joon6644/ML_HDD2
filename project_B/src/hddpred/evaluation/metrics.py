@@ -8,7 +8,17 @@
 2) 디스크 단위 판정 (rule)
    한 달의 평가 구간 안에서 각 디스크의 일별 예측을 혼동행렬 한 칸으로 접는다.
 
-   rule = "on_time" (기본)
+   rule = "in_horizon" (기본)
+
+       고장 H일 전 구간(y=1 행) 안에서 울렸으면 TP, 안 울렸으면 FN.
+       구간 밖 알람은 판정을 바꾸지 않는다. 미고장 디스크는 아무 때나
+       울리면 FP 다.
+
+       선언한 horizon 이 학습 라벨과 판정에 같이 적용되므로 "10일 예측"
+       이라는 선언과 채점이 일치한다. 창을 달력 한 달로 두고 아무 알람이나
+       인정하면 실제 인정 구간이 1~28일로 흩어진다 (실측).
+
+   rule = "on_time"
 
        out        = horizon 밖(y=0 행) 알람 >= 1
        in         = horizon 안(y=1 행) 알람 >= 1
@@ -84,7 +94,7 @@ def _brier(y_true: np.ndarray, score: np.ndarray) -> float:
 class DiskLevelSpec:
     """디스크 단위 집계 규칙."""
 
-    rule: str = "on_time"  # on_time | or
+    rule: str = "in_horizon"  # in_horizon | on_time | or
     aggregation: str = "any"  # any | consecutive
     consecutive_k: int = 2
     window_days: int | None = None  # None -> 평가 구간 전체가 한 창
@@ -100,7 +110,7 @@ class DiskLevelSpec:
         period: tuple[date, date] | None = None,
     ) -> "DiskLevelSpec":
         cfg = evaluation_cfg.get("disk_level", {})
-        rule = cfg.get("rule", "on_time")
+        rule = cfg.get("rule", "in_horizon")
         window = cfg.get("window_days", None)
         if window == "horizon":
             if horizon_days is None:
@@ -111,10 +121,10 @@ class DiskLevelSpec:
         elif window is not None:
             window = int(window)
 
-        if rule == "on_time" and window is not None and horizon_days is not None:
+        if rule in ("on_time", "in_horizon") and window is not None and horizon_days is not None:
             if window <= horizon_days:
                 raise ValueError(
-                    f"rule: on_time 인데 window_days({window}) <= horizon_days"
+                    f"rule: {rule} 인데 window_days({window}) <= horizon_days"
                     f"({horizon_days}) 다. 창 안 모든 행이 고장 H일 이내가 되어"
                     " horizon 밖 알람이 존재할 수 없고, 규칙이 단순 OR 집계로"
                     " 붕괴한다. window_days 를 null(평가 구간 전체)로 두어라."
@@ -306,6 +316,16 @@ def outcome_codes(units: pd.DataFrame, spec: DiskLevelSpec) -> np.ndarray:
     나눈다. FP 는 기록을 위해 fp_early(정답 구간이 있는 디스크)와
     fp_healthy(없는 디스크)로 나눠 둔다.
 
+    rule = "in_horizon":
+
+        has_window & in         -> TP   정답 구간 안에서 울렸다
+        has_window & ~in        -> FN   구간이 있는데 그 안에서 안 울렸다
+        ~has_window & 알람      -> FP   미고장 디스크가 울렸다
+        ~has_window & 무알람    -> TN
+
+        on_time 과의 차이는 구간 밖 알람을 처벌하지 않는다는 것뿐이다.
+        선언한 horizon 이 판정을 지배하면서 이중 처벌은 없다.
+
     rule = "or": 창 안에 알람이 하나라도 있으면 양성으로 보는 표준 OR 집계.
     """
     n = units.shape[0]
@@ -320,12 +340,25 @@ def outcome_codes(units: pd.DataFrame, spec: DiskLevelSpec) -> np.ndarray:
         codes[~predicted & actual] = FN
         return codes
 
-    if spec.rule != "on_time":
-        raise ValueError(f"알 수 없는 disk_level.rule: {spec.rule!r}")
-
     out_alarm = units["n_out_alarm"].to_numpy() > 0
     in_alarm = units["n_in_alarm"].to_numpy() > 0
     has_window = units["label_or"].to_numpy().astype(bool)
+
+    if spec.rule == "in_horizon":
+        # 정답 구간(고장 H일 전) 안에서 울렸으면 TP. 구간 밖 알람은 판정을
+        # 바꾸지 않는다 — 감점도 가점도 아니다. 미고장 디스크는 아무 때나
+        # 울리면 FP 이므로 오탐 부담은 그대로 측정된다.
+        codes[:] = TN
+        codes[has_window & in_alarm] = TP
+        codes[has_window & ~in_alarm] = FN
+        codes[~has_window & (out_alarm | in_alarm)] = FP_HEALTHY
+        return codes
+
+    if spec.rule != "on_time":
+        raise ValueError(
+            f"알 수 없는 disk_level.rule: {spec.rule!r} "
+            "(in_horizon | on_time | or)"
+        )
 
     codes[:] = TN
     codes[~out_alarm & ~in_alarm & has_window] = FN

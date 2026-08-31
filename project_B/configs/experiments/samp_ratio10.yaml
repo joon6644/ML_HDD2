@@ -47,8 +47,7 @@ overrides:
   features.train_sampling.negative_ratio: 10
   features.train_sampling.seed: 42
 
-  evaluation.disk_level.rule: or
-  evaluation.disk_level.ground_truth: calendar
+  evaluation.disk_level.rule: in_horizon
   evaluation.disk_level.window_days: null
 
   models.gru.training.epochs: 30
