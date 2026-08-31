@@ -1,0 +1,16 @@
+================================================================================
+ GENERATING 2X2 SOPHISTICATED ALARM HISTOGRAM PER HDD (HGST) 
+================================================================================
+
+[Processing] Model: LightGBM | Threshold: 0.8120
+[CACHE HIT] Instant load from report CSV -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\reports\seed42_alarm_report_HGST_20HUH721212ALN604_LGBM.csv
+
+[Processing] Model: XGBoost | Threshold: 0.2860
+[CACHE HIT] Instant load from report CSV -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\reports\seed42_alarm_report_HGST_20HUH721212ALN604_XGB.csv
+
+[Processing] Model: LSTM | Threshold: 0.1010
+[CACHE HIT] Instant load from report CSV -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\reports\seed42_alarm_report_HGST_20HUH721212ALN604_LSTM.csv
+
+[Processing] Model: GRU | Threshold: 0.1490
+[CACHE HIT] Instant load from report CSV -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\reports\seed42_alarm_report_HGST_20HUH721212ALN604_GRU.csv
+[SUCCESS] Saved 2x2 Sophisticated Histogram plot -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\HGST_20HUH721212ALN604_alarm_count_stacked_2x2.png

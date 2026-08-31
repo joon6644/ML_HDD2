@@ -1,0 +1,5 @@
+﻿metric,tau_row (median of cells),tau_op  (median of cells),median diff,ratio (op/row),cells improved,wilcoxon p (n=12)
+Disk Precision,0.124,0.295,+0.197,2.88x,12/12,0.0005
+Disk Recall,0.187,0.148,-0.045,0.79x,2/12,0.0923
+Disk FAR (%),6.161,1.103,-5.040,0.20x,12/12,0.0005
+Median Lead Time (d),93.500,46.750,-44.750,0.39x,12/12,0.0005

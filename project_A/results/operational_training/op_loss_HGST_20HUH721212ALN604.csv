@@ -1,0 +1,2 @@
+﻿OT,E,M,CE,CN,precision,recall,far,median_lt,dataset,seed,variant,tau,temp,pos_w,rounds,lr,secs
+10,27,125,11,966,0.20833333333333334,0.06172839506172839,0.011258955987717503,105.0,HGST_20HUH721212ALN604,42,op-loss,0.928,2.0,1.0,100,0.03,111.2

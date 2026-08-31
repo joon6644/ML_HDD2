@@ -1,0 +1,33 @@
+================================================================================
+ RECALL vs FAR SWEEP (SEED=42)
+ Datasets : ['ST12000NM0007', 'HGST_20HUH721212ALN604', 'TOSHIBA_20MG07ACA14TA']
+ Models   : ['lgbm', 'xgb', 'lstm', 'gru']
+ MAX_FAR constraint (from config): 1.0%
+================================================================================
+
+[Processing] ST12000NM0007 | LGBM
+
+[Processing] ST12000NM0007 | XGB
+
+[Processing] ST12000NM0007 | LSTM
+
+[Processing] ST12000NM0007 | GRU
+
+[Processing] HGST_20HUH721212ALN604 | LGBM
+
+[Processing] HGST_20HUH721212ALN604 | XGB
+
+[Processing] HGST_20HUH721212ALN604 | LSTM
+
+[Processing] HGST_20HUH721212ALN604 | GRU
+
+[Processing] TOSHIBA_20MG07ACA14TA | LGBM
+
+[Processing] TOSHIBA_20MG07ACA14TA | XGB
+
+[Processing] TOSHIBA_20MG07ACA14TA | LSTM
+
+[Processing] TOSHIBA_20MG07ACA14TA | GRU
+[Plot Saved] -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\seed42_recall_vs_far_grid.png
+
+Done.

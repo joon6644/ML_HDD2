@@ -1,0 +1,11 @@
+[Data Loader] Loading pre-extracted temporal clustering events from C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\HGST_20HUH721212ALN604_all_alarm_events_temporal_clustering.csv
+
+================================================================================
+ [SUCCESS] Temporal Alarm Clustering 2x2 Grid Image Updated!
+  - Removed KDE curve line
+  - Removed vertical reference lines and legends completely
+  - Matched Trendy Academic styling (Option B colors, black borders, 35 bins, label_outer)
+ Saved to:
+  -> C:\Workspace\projects\26_2_COIN\results\lead_time_analysis\HGST_20HUH721212ALN604_4models_2x2_alarm_temporal_clustering.png
+================================================================================
+

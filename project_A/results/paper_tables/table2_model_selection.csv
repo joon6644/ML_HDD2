@@ -1,0 +1,4 @@
+﻿dataset,n_seed,Top-1 agree: paradigms,Top-1 agree: criterion only,Top-1 agree: seed baseline,Spearman: paradigms,Spearman: criterion only,Spearman: seed baseline
+HGST,30,33%,0%,71%,+0.033,-0.660,+0.764
+Seagate,30,43%,70%,46%,+0.173,+0.727,+0.591
+Toshiba,30,17%,60%,51%,-0.100,+0.433,+0.307

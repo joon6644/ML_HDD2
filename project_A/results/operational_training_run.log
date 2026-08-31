@@ -1,0 +1,35 @@
+
+=== HGST_20HUH721212ALN604  seed 42 ===
+Loading datasets from: C:\Workspace\projects\26_2_COIN\data\splitted\HGST_20HUH721212ALN604
+Loaded: Train=21,242,883 | Val=2,667,014 | Test=2,661,871 | Features=18
+  [base   ] tau=0.812  P=0.204 R=0.062 FAR=1.23% medLT=105  (OT 10 / E 27 / M 125 / CE 12 / CN 965)  184.1s
+  [perdisk] tau=0.955  P=0.118 R=0.012 FAR=0.61% medLT=65  (OT 2 / E 9 / M 151 / CE 6 / CN 971)  223.1s
+  [early  ] tau=0.093  P=0.347 R=0.105 FAR=0.92% medLT=36  (OT 17 / E 23 / M 122 / CE 9 / CN 968)  29.7s
+  [both   ] tau=0.999  P=0.125 R=0.006 FAR=0.41% medLT=134  (OT 1 / E 3 / M 158 / CE 4 / CN 973)  244.0s
+
+=== HGST_20HUH721212ALN604  seed 43 ===
+[Data Loader Cache HIT] Reusing in-memory preloaded dataset for: C:\Workspace\projects\26_2_COIN\data\splitted\HGST_20HUH721212ALN604
+Loaded: Train=21,242,883 | Val=2,667,014 | Test=2,661,871 | Features=18
+  [base   ] tau=0.385  P=0.163 R=0.043 FAR=1.43% medLT=81  (OT 7 / E 22 / M 133 / CE 14 / CN 963)  97.7s
+  [perdisk] tau=0.955  P=0.118 R=0.012 FAR=0.92% medLT=56  (OT 2 / E 6 / M 154 / CE 9 / CN 968)  235.5s
+  [early  ] tau=0.205  P=0.208 R=0.068 FAR=1.54% medLT=62  (OT 11 / E 27 / M 124 / CE 15 / CN 962)  55.5s
+  [both   ] tau=0.978  P=0.118 R=0.012 FAR=1.02% medLT=139  (OT 2 / E 5 / M 155 / CE 10 / CN 967)  240.8s
+
+=== HGST_20HUH721212ALN604  seed 44 ===
+[Data Loader Cache HIT] Reusing in-memory preloaded dataset for: C:\Workspace\projects\26_2_COIN\data\splitted\HGST_20HUH721212ALN604
+Loaded: Train=21,242,883 | Val=2,667,014 | Test=2,661,871 | Features=18
+  [base   ] tau=0.999  P=0.415 R=0.105 FAR=0.92% medLT=18  (OT 17 / E 15 / M 130 / CE 9 / CN 968)  239.8s
+  [perdisk] tau=0.981  P=0.118 R=0.012 FAR=0.72% medLT=234  (OT 2 / E 8 / M 152 / CE 7 / CN 970)  247.3s
+  [early  ] tau=0.451  P=0.289 R=0.068 FAR=0.41% medLT=68  (OT 11 / E 23 / M 128 / CE 4 / CN 973)  114.9s
+  [both   ] tau=0.983  P=0.227 R=0.031 FAR=0.92% medLT=33  (OT 5 / E 8 / M 149 / CE 9 / CN 968)  252.3s
+
+==============================================================================
+median over 3 seed(s), tau_op, HGST_20HUH721212ALN604
+         precision    recall       far  median_lt    OT     E      M    CE
+variant                                                                   
+base      0.204082  0.061728  0.012282       81.0  10.0  22.0  130.0  12.0
+perdisk   0.117647  0.012346  0.007165       65.0   2.0   8.0  152.0   7.0
+early     0.289474  0.067901  0.009212       61.5  11.0  23.0  124.0   9.0
+both      0.125000  0.012346  0.009212      133.5   2.0   5.0  155.0   9.0
+==============================================================================
+csv: C:\Workspace\projects\26_2_COIN\results\operational_training\weight_variants_HGST_20HUH721212ALN604.csv
