@@ -1,0 +1,25 @@
+# Fully Convolutional Network. conv 3층 + global average pooling.
+# 시계열 분류의 표준 기준선 (Fawaz et al. 2019 리뷰).
+name: fcn
+family: sequence
+class: hddpred.models.sequence.FCNModel
+
+params:
+  channels: [128, 256, 128]
+  kernels: [7, 5, 3]
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pr_auc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

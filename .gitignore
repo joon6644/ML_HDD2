@@ -45,3 +45,27 @@ results/backup_*/
 # OS temporary files
 .DS_Store
 Thumbs.db
+# ---------------------------------------------------------------------------
+# project_B — 파생 데이터와 실험 산출물
+#
+# 전부 원본 + 코드 + 설정으로 재생성된다. 리포에는 재생성 방법만 남긴다.
+# ---------------------------------------------------------------------------
+
+# canonical / features / labels / splits 레이어 (수십 GB)
+project_B/data/
+
+# 실험 산출물. 모델 체크포인트와 예측 parquet 이 들어간다.
+project_B/runs/
+
+# MLflow 추적 저장소
+project_B/mlruns/
+project_B/mlartifacts/
+project_B/mlflow.db
+
+# DuckDB 임시 파일
+*.db
+*.db.wal
+project_B/.tmp/
+
+# 리포트 산출물
+project_B/reports/

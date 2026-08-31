@@ -1,0 +1,20 @@
+# 대칭 트리(oblivious tree) 부스팅. 결측을 자체 처리한다.
+# scale_pos_weight 는 쓰지 않는다 — 확률이 1.0 으로 포화되어 임곗값 선택이
+# 무의미해지는 것을 LightGBM 에서 실측했다.
+
+name: catboost
+family: tabular
+class: hddpred.models.trees.CatBoostModel
+
+params:
+  iterations: 2000
+  learning_rate: 0.05
+  depth: 6
+  l2_leaf_reg: 3.0
+  loss_function: Logloss
+  eval_metric: PRAUC
+  thread_count: 8
+  allow_writing_files: false
+
+training:
+  early_stopping_rounds: 100

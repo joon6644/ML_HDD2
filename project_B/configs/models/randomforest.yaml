@@ -1,0 +1,19 @@
+# 배깅 계열 대조군. 부스팅(LightGBM/XGBoost/CatBoost)과 과적합 경향이 다르다.
+# sklearn 1.4+ 는 결측을 그대로 처리하므로 트리 계열과 같은 입력을 쓴다.
+
+name: randomforest
+family: tabular
+class: hddpred.models.trees.RandomForestModel
+
+params:
+  n_estimators: 300
+  max_depth: null
+  min_samples_leaf: 20
+  max_features: sqrt
+  n_jobs: 8
+  verbose: 0
+
+training:
+  # 부스팅의 scale_pos_weight 와 달리 class_weight 는 확률을 포화시키지 않는다
+  # (평균 투표라 [0,1] 안에 머문다). 다만 기본은 끄고 임곗값으로 다룬다.
+  auto_class_weight: false

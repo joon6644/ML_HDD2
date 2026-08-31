@@ -1,0 +1,24 @@
+# 테이블용 ResNet (Gorishniy et al. 2021). 잔차 블록을 쌓아 MLP 보다 깊게 간다.
+# "신경망을 더 잘 만들면 트리를 이기는가"의 대조군.
+name: tabresnet
+family: tabular
+class: hddpred.models.mlp.TabResNetModel
+
+params:
+  width: 256
+  depth: 4
+  dropout: 0.2
+
+training:
+  epochs: 30
+  batch_size: 4096
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

@@ -1,0 +1,26 @@
+# FT-Transformer (Gorishniy et al. 2021). 피처 하나하나를 토큰으로 만들어
+# Transformer 에 넣는다. 시퀀스 Transformer 가 "시점"을 토큰으로 보는 것과
+# 달리 여기서는 "피처"가 토큰이다 — 시간 구조 없이 피처 상호작용만 본다.
+name: fttransformer
+family: tabular
+class: hddpred.models.mlp.FTTransformerModel
+
+params:
+  d_token: 64
+  depth: 3
+  nhead: 8
+  dropout: 0.1
+
+training:
+  epochs: 30
+  batch_size: 2048
+  learning_rate: 0.0005
+  weight_decay: 0.00001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

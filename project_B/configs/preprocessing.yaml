@@ -1,0 +1,36 @@
+# raw -> canonical 변환 설정.
+#
+# project_A/preprocessing/common.py 의 전처리 로직을 그대로 이식했다.
+# 원본은 모든 컬럼이 string 타입이므로 이 단계에서 수치 캐스팅까지 끝낸다.
+#
+# 주의: 여기서 정규화(스케일링)를 하지 않는다. 스케일러는 fold의 train
+# 구간에서만 적합시켜야 하므로 features 단계로 미룬다.
+
+# smart_*_raw만 사용하고 smart_*_normalized는 버린다.
+feature_source: smart_raw
+
+# 결측률이 이 값 이상인 SMART 컬럼은 제거한다.
+missing_ratio_threshold: 0.90
+
+# 누락일이 이 값 이하이면 날짜 행을 생성하고 forward fill 한다.
+# 초과하면 별도 segment로 분리한다 (segment 경계를 넘는 fill 없음).
+max_fillable_missing_days: 3
+
+# forward fill만 수행한다. backward fill은 미래 관측치를 참조하므로 금지.
+fill_direction: forward_only
+
+# forward fill 후에도 결측이 남은 행(세그먼트 시작부 미관측)은 제거한다.
+drop_incomplete_rows: true
+
+# failure=1 이후 다시 failure=0이 관측된 HDD는 전체 제거한다.
+# (수리 후 재투입 또는 라벨 이상)
+drop_recovered_disks: true
+
+# canonical 출력은 월 단위로 partition한다. 시간축 split이 필요한 구간만
+# scan하기 위한 것이다.
+partition_by: month
+
+duckdb:
+  max_memory: "16GB"
+  threads: 8
+  temp_dir: "${project_root}/.tmp"

@@ -1,0 +1,94 @@
+# canonical -> model-ready 피처 설정.
+#
+# 설계 원칙:
+#   행 단위 인과적 변환(같은 디스크의 과거 값만 참조하는 diff/rolling)은
+#   fold와 무관하므로 전체 구간에서 한 번만 계산한다. 누출이 없고 훨씬 빠르다.
+#
+#   반면 여러 디스크에 걸쳐 통계를 적합시키는 것(스케일러)은 fold의 train
+#   구간에서만 적합시켜야 한다. 그래서 스케일링은 여기가 아니라 학습 시점에
+#   fold 안에서 수행한다.
+#
+# 파생 피처는 (serial_number, segment) 로 partition 해서 계산한다. 관측 공백을
+# 사이에 둔 두 구간을 이어 붙여 차분하지 않기 위해서다. 그 결과 segment
+# 시작부의 diff/rolling 은 NULL 이 된다. 트리 모델은 결측을 그대로 처리하고,
+# 시퀀스 모델은 raw 컬럼만 쓰므로 이 NULL 을 보지 않는다.
+
+base:
+  include_raw: true # canonical 에 남은 smart_*_raw 전부
+  include_age: true # 디스크 나이, segment 나이
+
+  # 파생(diff/rolling)을 적용할 대상.
+  #   all      전체 SMART 컬럼. 컬럼 수가 폭증하므로 권장하지 않는다.
+  #   critical 아래 critical_smart 목록과 실제 존재하는 컬럼의 교집합
+  derived_on: critical
+
+  # 고장 관련성이 알려진 속성들. canonical 에 없으면 조용히 건너뛴다.
+  #   5   재할당 섹터 수      197 현재 보류 섹터
+  #   187 보고된 정정불가 오류 198 오프라인 정정불가
+  #   188 명령 타임아웃       199 UDMA CRC 오류
+  #   9   전원 인가 시간      193 로드/언로드 사이클
+  #   194 온도               22  헬륨 수준 (HGST He 드라이브)
+  critical_smart:
+    - smart_5_raw
+    - smart_9_raw
+    - smart_22_raw
+    - smart_187_raw
+    - smart_188_raw
+    - smart_193_raw
+    - smart_194_raw
+    - smart_197_raw
+    - smart_198_raw
+    - smart_199_raw
+
+  # 차분: value(t) - value(t - k)
+  diff_lags: [1, 7, 30]
+
+  # 롤링 통계: 과거 w일 (현재 시점 포함, 미래 미참조)
+  rolling_windows: [7, 30]
+  rolling_stats: [mean, std]
+
+  # segment 시작 이후 누적 증가량. 단조 증가 카운터에 유효하다.
+  include_since_start: true
+
+tabular:
+  # 트리 모델 입력. base 피처를 그대로 평탄화해서 쓴다.
+  use: base
+
+sequence:
+  # 시퀀스 모델 입력. (lookback_days, n_features) 텐서.
+  lookback_days: 30
+  # 시퀀스에는 diff/rolling 을 중복으로 넣지 않는다. 모델이 직접 학습한다.
+  columns: raw_and_age
+  # lookback 을 같은 segment 안에서 채우지 못하는 표본 처리.
+  #   pad  : 앞쪽을 그 segment 의 첫 행으로 복제하고 mask 채널(1=실제/0=패딩)을
+  #          붙인다. 입력 채널이 하나 늘어난다. 관측 공백으로 segment 가 새로
+  #          시작된 디스크도 살아남아 트리 모델과 평가 모집단이 같아진다.
+  #   drop : 버린다. 모집단이 줄어들어 트리 모델과 분모가 달라진다.
+  short_history: pad
+
+scaling:
+  # fold 의 train 구간에서만 적합시킨다.
+  method: standard # standard | robust | none
+  # 극단값 절단 (train 분위수 기준)
+  clip_quantile: [0.001, 0.999]
+
+# 학습 표본 수 조절. 평가에는 절대 적용하지 않는다.
+train_sampling:
+  # none      전 구간 전 표본 사용 (Scope = Full)
+  # stride    음성 표본만 n일 간격으로 추출, 양성은 전부 유지
+  # match_val 확장 창 재학습용 구성.
+  #
+  #             [과거 양성 전량]
+  #           + [직전 keep_recent_months 개월 전량 (양성·음성 모두)]
+  #           + [그 이전 음성 일부 표집]
+  #
+  #           표집률은 학습 표본의 양성 비율이 그 fold 의 val 창 양성 비율과
+  #           같아지도록 정한다. 양성은 한 행도 버리지 않으므로 목표에 닿는
+  #           수단은 음성 감축뿐이고, train 이 이미 val 보다 양성 희박하면
+  #           (필요 음성 > 보유 음성) 과거 음성을 전부 남긴다. 그때는 실제
+  #           비율이 목표보다 낮게 나오고 fold_metrics.json 의 sampling 에
+  #           그 사실이 남는다.
+  strategy: none
+  negative_stride: 7
+  keep_recent_months: 1
+  seed: 42

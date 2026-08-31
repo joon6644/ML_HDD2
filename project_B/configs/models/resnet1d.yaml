@@ -1,0 +1,23 @@
+# 1D ResNet. 잔차 블록 3개 + GAP. FCN 과 함께 표준 기준선.
+name: resnet1d
+family: sequence
+class: hddpred.models.sequence.ResNet1DModel
+
+params:
+  channels: [64, 128, 128]
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pr_auc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

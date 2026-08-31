@@ -1,0 +1,32 @@
+# 모델 비교 실험.
+#
+# 하나의 canonical / label / split 위에서 모델만 갈아끼운다.
+# 평가 모듈은 모델이 XGBoost인지 GRU인지 알지 못한다.
+
+experiment: model_comparison
+
+# 이 실험이 고정하는 config 조합. run 디렉터리에 resolved 상태로 저장된다.
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/xgboost.yaml
+  - configs/models/lightgbm.yaml
+  - configs/models/lstm.yaml
+  - configs/models/gru.yaml
+  - configs/models/tcn.yaml
+  - configs/models/transformer.yaml
+
+seeds: [42, 1234, 2024]
+
+# 실행할 fold. null이면 split manifest의 전체 fold.
+folds: null
+
+output_root: "${project_root}/runs"

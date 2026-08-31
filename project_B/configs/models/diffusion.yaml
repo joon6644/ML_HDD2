@@ -1,0 +1,34 @@
+# 확산 모델 이상탐지 (AnoDDPM 계열).
+#
+# 정상 개체의 행만 학습하고, 표본에 t단계 노이즈를 씌웠다 걷어낸 뒤의 거리를
+# 이상 점수로 쓴다. AutoEncoder 와 전제는 같고 복원 방식이 다르다 —
+# 병목이 없고 노이즈 수준 t 가 "어느 규모의 이상을 볼 것인가"를 정한다.
+#
+# eval_t 를 낮추면 국소적 이상, 높이면 전역 구조 이상에 민감해진다.
+# 전체 역확산(200단계)은 표본 17만개에 3천만 forward 라 돌리지 않고,
+# 한 번 복원을 eval_repeats 회 평균한다.
+#
+# ⚠ 확산을 양성 표본 증강에 쓰는 용법(TabDDPM 의 원래 목적)은 쓰지 않는다.
+#   합성 표본이 평가 집합에 새면 결과가 무효가 된다.
+
+name: diffusion
+family: tabular
+class: hddpred.models.diffusion.DiffusionAnomalyModel
+
+params:
+  timesteps: 200
+  width: 512
+  depth: 3
+  time_dim: 128
+  eval_t: 50
+  eval_repeats: 4
+
+training:
+  epochs: 30
+  batch_size: 4096
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 5
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

@@ -1,0 +1,13 @@
+# 단일 결정트리. 앙상블 이득이 얼마인지 재는 최소 기준선이다.
+name: decisiontree
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.tree.DecisionTreeClassifier
+  kwargs:
+    max_depth: 12
+    min_samples_leaf: 50
+
+training:
+  scale_inputs: false

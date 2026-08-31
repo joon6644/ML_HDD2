@@ -1,0 +1,20 @@
+# sklearn 자체 히스토그램 부스팅. LightGBM 과 같은 계열이며 결측을 분기로
+# 직접 처리한다. 구현 차이가 결과에 얼마나 남는지 보는 대조군.
+name: histgb
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.ensemble.HistGradientBoostingClassifier
+  kwargs:
+    max_iter: 500
+    learning_rate: 0.05
+    max_leaf_nodes: 63
+    min_samples_leaf: 50
+    l2_regularization: 1.0
+    early_stopping: true
+    validation_fraction: 0.1
+    n_iter_no_change: 50
+
+training:
+  scale_inputs: false

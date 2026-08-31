@@ -1,0 +1,18 @@
+# LSTM 오토인코더 이상탐지. dense AutoEncoder 와 전제는 같고(정상 개체만
+# 학습, 재구성 오차가 점수) 입력이 한 행이 아니라 lookback 창이다.
+# 값은 정상 범위인데 변화 궤적이 이상한 경우를 잡는지 보는 모델.
+name: lstm_ae
+family: sequence
+class: hddpred.models.seq_autoencoder.SeqAutoEncoderModel
+
+params:
+  hidden_size: 64
+  latent_dim: 16
+  num_layers: 1
+
+training:
+  epochs: 20
+  batch_size: 512
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 4

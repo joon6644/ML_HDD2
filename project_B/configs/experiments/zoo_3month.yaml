@@ -1,0 +1,110 @@
+# 모델 29종 — 한 번 학습, 세 달 각각 예측.
+#
+#   train  2018-08-01 ~ 2025-10-31   (관측 전 구간)
+#   val    2025-11
+#   test   2025-12 · 2026-01 · 2026-02   <- 재학습 없이 세 달을 각각 채점
+#
+# zoo_single 과 같은 프로토콜인데 채점 달이 셋이다. 고장이 14대에서 47대로
+# 늘어 recall 눈금이 7.1%p 에서 2.1%p 로 세밀해진다.
+#
+# 구현: split 을 3 fold 로 만들되 fold 0(test 2025-12) 만 학습한다.
+# 나머지 두 달은 저장된 모델로 사후 채점한다 (scripts 없이 별도 스크립트).
+# 그래야 "하나의 모델"이라는 성질이 유지된다.
+#
+# ⚠ 세 달의 난이도가 같지 않다. 모델은 2025-10 까지만 보므로 2025-12 는
+#   2개월, 2026-02 는 4개월 뒤를 예측하는 셈이다. 그 격차 자체가 관측 대상이다.
+
+experiment: zoo_3month
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+models:
+  # --- 부스팅 트리 ---
+  - configs/models/lightgbm.yaml
+  - configs/models/xgboost.yaml
+  - configs/models/catboost.yaml
+  - configs/models/histgb.yaml
+  # --- 배깅 / 단일 트리 ---
+  - configs/models/randomforest.yaml
+  - configs/models/extratrees.yaml
+  - configs/models/decisiontree.yaml
+  # --- 선형 / 확률 ---
+  - configs/models/logreg.yaml
+  - configs/models/lda.yaml
+  - configs/models/gaussiannb.yaml
+  # --- 테이블 신경망 ---
+  - configs/models/mlp.yaml
+  - configs/models/tabresnet.yaml
+  - configs/models/fttransformer.yaml
+  # --- 순환 ---
+  - configs/models/gru.yaml
+  - configs/models/lstm.yaml
+  - configs/models/bigru.yaml
+  - configs/models/bilstm.yaml
+  - configs/models/attnrnn.yaml
+  # --- 합성곱 / 주의집중 ---
+  - configs/models/cnn1d.yaml
+  - configs/models/tcn.yaml
+  - configs/models/fcn.yaml
+  - configs/models/resnet1d.yaml
+  - configs/models/inceptiontime.yaml
+  - configs/models/lstmfcn.yaml
+  - configs/models/transformer.yaml
+  # --- 이상탐지 (정상 개체만 학습) ---
+  - configs/models/autoencoder.yaml
+  - configs/models/lstm_ae.yaml
+  - configs/models/isolationforest.yaml
+  - configs/models/diffusion.yaml
+
+seeds: [42]
+folds: [0]
+warm_start: false
+
+overrides:
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  features.train_sampling.strategy: stride
+  features.train_sampling.negative_stride: 30
+
+  evaluation.disk_level.rule: or
+  evaluation.disk_level.ground_truth: calendar
+  evaluation.disk_level.window_days: null
+
+  models.gru.training.epochs: 30
+  models.bigru.training.epochs: 30
+  models.bilstm.training.epochs: 30
+  models.attnrnn.training.epochs: 30
+  models.fcn.training.epochs: 30
+  models.resnet1d.training.epochs: 30
+  models.inceptiontime.training.epochs: 30
+  models.lstmfcn.training.epochs: 30
+  models.tabresnet.training.epochs: 30
+  models.fttransformer.training.epochs: 30
+  models.bigru.training.epochs: 30
+  models.bilstm.training.epochs: 30
+  models.lstm.training.epochs: 30
+  models.cnn1d.training.epochs: 30
+  models.tcn.training.epochs: 30
+  models.transformer.training.epochs: 30
+
+output_root: "${project_root}/runs"

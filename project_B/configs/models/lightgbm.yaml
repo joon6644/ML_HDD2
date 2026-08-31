@@ -1,0 +1,25 @@
+name: lightgbm
+family: tabular
+class: hddpred.models.trees.LightGBMModel
+
+params:
+  n_estimators: 3000
+  learning_rate: 0.05
+  num_leaves: 63
+  min_child_samples: 50
+  subsample: 0.8
+  subsample_freq: 1
+  colsample_bytree: 0.8
+  reg_lambda: 1.0
+  objective: "binary"
+  metric: "average_precision"
+  n_jobs: 8
+  verbose: -1
+
+training:
+  early_stopping_rounds: 100
+  # scale_pos_weight = 음성/양성 이라 양성률 0.014% 구간에서 7,000배가 나온다.
+  # 그러면 raw score 가 커져 sigmoid 가 정확히 1.0 으로 포화되고, 임곗값을
+  # 어디에 두든 알람 집합이 변하지 않는다 (실측: 56 fold 중 48개가 임곗값 1.0).
+  # 불균형은 임곗값 선택으로 다룬다. 손실 가중으로 다루지 않는다.
+  auto_scale_pos_weight: false

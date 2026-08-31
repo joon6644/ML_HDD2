@@ -1,0 +1,17 @@
+# Isolation Forest 이상탐지. AutoEncoder 와 같은 전제(정상 개체만 학습)이나
+# 재구성이 아니라 고립 깊이로 이상도를 잰다. 점수는 확률이 아니다.
+name: isolationforest
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.ensemble.IsolationForest
+  kwargs:
+    n_estimators: 300
+    max_samples: 4096
+    contamination: auto
+    n_jobs: 8
+
+training:
+  scale_inputs: false
+  unsupervised: true

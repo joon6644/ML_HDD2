@@ -1,0 +1,47 @@
+# canonical -> labeled 변환 설정.
+#
+# 예측 문제 정의:
+#
+#   관측 시점 t의 SMART 이력만 사용하여
+#   "이 HDD가 (t, t + H] 구간 안에 고장나는가?"를 예측한다.
+#
+#   feature cutoff = t
+#   label window   = (t, t + horizon_days]
+#
+# horizon_days = 10 은 선행연구 다수파와 일치한다.
+#   SMARTer (2020)        Interval 10 d
+#   LightGBM + CID (2021) Interval 10 d
+#   Model update (2021)   Interval 10 d
+#   Disk replacement(2016) Interval 10-15 d
+# 값을 바꾸면 새 label config hash 폴더가 생기고 기존 결과는 보존된다.
+
+horizon_days: 10
+
+# 고장일(failure=1이 처음 기록된 날) 이후의 행은 표본에서 제외한다.
+# 이미 고장난 디스크의 고장을 예측할 수는 없다.
+exclude_post_failure_rows: true
+
+# 라벨 관측 가능성(censoring) 판정.
+#
+# true이면 다음 조건을 만족하는 표본만 남긴다.
+#   - 고장 디스크: t < failure_date  (라벨이 항상 확정된다)
+#   - 미고장 디스크: last_observed_date >= t + horizon_days
+#     (horizon 끝까지 생존을 확인할 수 있어야 음성으로 확정할 수 있다)
+#
+# false로 두면 관측 구간 끝의 미확정 표본이 음성으로 잘못 섞인다.
+require_horizon_observability: true
+
+# 검열 판정의 기준 시점.
+#   global : 관측 전 구간을 근거로 판정한다. 2월 창에서도 3월 데이터를 써서
+#            "2월 25일 시점에 10일 안에 고장났는가"를 확정한다.
+#   window : 창 끝까지 알 수 있는 정보만 쓴다. 그 달이 끝난 시점에 실제로
+#            판정한다면 이쪽이다. 창 끝 H일 구간은 고장이 창 안에서 확인되지
+#            않는 한 표본에서 빠진다.
+#
+# 라벨 레이어의 내용은 두 값에서 같다. 창별로 걸리는 필터라 fold 적재 시점에
+# 적용되며, 그래서 label config hash 에 들어가지 않는다.
+censoring_scope: window
+
+# 디스크마다 관측 시작 직후 이 일수만큼은 표본으로 쓰지 않는다.
+# 시퀀스 모델의 lookback과 롤링 피처가 채워질 시간을 준다.
+min_history_days: 30

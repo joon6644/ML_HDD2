@@ -1,0 +1,101 @@
+# Expanding-window retraining + recent-month retention + negative subsampling
+#
+#   t월까지의 데이터로 학습해 t+1월을 예측한다. 창은 매달 한 달씩 늘어나고,
+#   직전 fold 의 가중치는 이어받지 않는다. 매달 새 모델이다.
+#
+#   fold 0   train 2018-08 .. 2018-08   val 2018-09   test 2018-10
+#   fold 1   train 2018-08 .. 2018-09   val 2018-10   test 2018-11
+#   fold 2   train 2018-08 .. 2018-10   val 2018-11   test 2018-12
+#   ...
+#
+# 학습 표본 구성 (features.train_sampling.strategy: match_val):
+#
+#     [과거 Positive 전체]
+#   + [직전 1개월 Positive + Negative 전체]
+#   + [과거 Negative 일부 표집]
+#
+#   표집률은 학습 표본의 양성 비율이 그 fold 의 val 창 양성 비율과 같아지도록
+#   정한다. 최근 한 달은 온전히 보존하고, 과거는 양성만 전량 남긴다.
+#
+#   ⚠ 양성을 하나도 버리지 않으므로 목표 비율에 닿는 수단은 음성 감축뿐이다.
+#     train 의 자연 불균형이 val 창보다 양성 희박한 달에는 (필요 음성 > 보유
+#     음성) 과거 음성이 전부 남고 감축이 일어나지 않는다. 매 fold 의 실제
+#     표집 결과는 fold_metrics.json 의 sampling 에 기록된다.
+#
+# 판정 (configs/evaluation.yaml 의 rule: on_time):
+#
+#   창 안에 고장 라벨이 있는 HDD
+#     horizon 밖에서 한 번이라도 울림          -> FP
+#     horizon 안에서 울리고 밖에서는 안 울림    -> TP
+#     아예 안 울림                             -> FN
+#   우측 중도절단 HDD
+#     한 번이라도 울림                         -> FP
+#     아예 안 울림                             -> TN
+#
+# 검열은 창 기준이다 (labeling.censoring_scope: window). 각 창의 끝 10일은
+# 그 창 안에서 고장이 확인되지 않는 한 표본에서 빠진다. 그 달이 끝난 시점에
+# 실제로 판정한다면 그 구간은 아직 결과를 알 수 없기 때문이다.
+#
+# 세 구간 중 하나라도 양성이 0이면 그 달은 fold 로 만들지 않는다.
+#
+# ⚠ 세 달을 붙여 쓰므로 embargo 가 0 이다. train 마지막 10일의 라벨이 val 의
+#   첫 10일 고장을 참조하고, val 마지막 10일이 test 의 첫 10일을 참조한다.
+#   프로토콜이 요구하는 구조라 allow_label_overlap 으로 명시 승인한다.
+#   구간을 떼고 싶으면 split.embargo_days 를 10 으로 올리면 된다.
+
+experiment: monthly_expanding
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+# 우선 가장 빠른 모델 하나로 프로토콜 전체를 돌린다.
+# 나머지는 주석을 풀면 된다. 완료된 run 은 재사용되므로 이어서 돌아간다.
+models:
+  - configs/models/lightgbm.yaml
+  # - configs/models/xgboost.yaml
+  # - configs/models/lstm.yaml
+  # - configs/models/gru.yaml
+  # - configs/models/tcn.yaml
+  # - configs/models/transformer.yaml
+
+seeds: [42]
+folds: null
+
+# 매달 새로 학습한다. 가중치를 이어받지 않는다.
+warm_start: false
+
+overrides:
+  # --- 확장 창, 한 달씩 이동 ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: null # 생애 전반
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  # --- 라벨 ---
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 표본 ---
+  features.train_sampling.strategy: match_val
+  features.train_sampling.keep_recent_months: 1
+  features.train_sampling.seed: 42
+
+  # --- 판정 ---
+  evaluation.disk_level.rule: on_time
+  evaluation.disk_level.window_days: null
+
+output_root: "${project_root}/runs"

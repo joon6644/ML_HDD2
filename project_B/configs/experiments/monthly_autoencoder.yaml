@@ -1,0 +1,68 @@
+# 오토인코더 이상탐지 — 월 단위 확장 창 재학습.
+#
+# 분할 프로토콜은 monthly_expanding 과 완전히 같다. 바뀌는 것은 "무엇으로
+# 학습하는가" 하나다.
+#
+#   monthly_expanding   양성·음성 모두 보고 고장의 모양을 배운다 (지도학습)
+#   monthly_autoencoder 정상 개체만 보고 정상의 모양을 배운다 (이상탐지)
+#
+# 두 실험의 fold 집합이 같아야 직접 비교가 되므로, 오토인코더가 학습에 쓰지도
+# 않는 split.min_train_failures 를 1 로 그대로 둔다. 0 으로 낮추면 fold 가
+# 9개쯤 늘어나지만 monthly_expanding 결과와 나란히 놓을 수 없게 된다.
+#
+# 표본:
+#   확장 창이라 후반 fold 의 train 이 2,300만 행이다. 신경망을 매달 새로
+#   학습하려면 줄여야 한다. 일 단위 SMART 는 자기상관이 매우 높아 7일 간격
+#   추출로도 정상의 분포는 충분히 표현된다. match_val 은 쓰지 않는다 —
+#   양성 비율을 맞추는 규칙인데 이 모델은 양성을 아예 안 보기 때문이다.
+#
+# 점수:
+#   재구성 오차. 클수록 이상. 임곗값은 다른 모델과 똑같이 val 에서 고른다.
+
+experiment: monthly_autoencoder
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/autoencoder.yaml
+
+seeds: [42]
+folds: null
+
+warm_start: false
+
+overrides:
+  # --- monthly_expanding 과 동일한 분할 ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: null
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  # --- 라벨 ---
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 표본 ---
+  features.train_sampling.strategy: stride
+  features.train_sampling.negative_stride: 7
+
+  # --- 판정 ---
+  evaluation.disk_level.rule: on_time
+  evaluation.disk_level.window_days: null
+
+output_root: "${project_root}/runs"

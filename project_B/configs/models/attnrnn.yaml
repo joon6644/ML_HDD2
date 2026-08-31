@@ -1,0 +1,27 @@
+# GRU + attention pooling. 마지막 시점만 쓰는 대신 시점 가중합을 쓴다.
+# HDD 연구에서 자주 쓰이는 변형이다.
+name: attnrnn
+family: sequence
+class: hddpred.models.sequence.AttentionRNNModel
+
+params:
+  cell: gru
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pr_auc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

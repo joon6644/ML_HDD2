@@ -1,0 +1,93 @@
+# RODMAN (Han et al., arXiv:1912.09722) 평가 방식 재현.
+#
+# 원문에서 재현하는 것:
+#
+#   프로토콜   "we use the first three months as the training phase and the
+#              fourth month as the testing phase. We slide one month for the
+#              next run... We present the average results over all runs."
+#              -> rolling 3개월 학습 / 1개월 테스트 / 한 달씩 이동 / 매 run 재학습
+#
+#   평가 단위  디스크. 테스트 달 전체를 한 창으로 본다 (window_days: null)
+#
+#   정답       달력 기준. "the total number of actual disk failures in
+#              one-month testing" -> ground_truth: calendar
+#              그 결과 5월 31일에 울리고 6월 1일에 고장하는 디스크는 5월
+#              평가에서 healthy 이고 그 알람은 FP 다.
+#
+#   지표       TPR 과 FPR 둘뿐. FPR 분모는 미고장 디스크
+#              "falsely predicted failed disks ... to the total number of
+#              healthy disks in one-month testing"
+#
+#   운영점     고정 FPR. Alibaba 0.1% / Backblaze 4.0%
+#              -> policy: fixed_disk_far, 값 0.04 (Backblaze 기준)
+#
+#   모집단     테스트 달 안에서는 축소하지 않는다. 음성 표본 축소는 학습 전용
+#              ("our training chooses ... negative samples only on the last
+#              day observed") -> train_sampling: none
+#
+# 재현하지 않는 것 (원문에 있으나 여기서 다르게 두는 것):
+#
+#   1. backtracking 구간 자동 결정
+#      원문은 Bayesian change point detection 으로 데이터셋마다 정한다
+#      (A1 29일 / B1 27일, Backblaze 는 run 마다 H1 2~58일 / S1 3~40일).
+#      여기서는 30일 고정이다. 따라서 Verdict 가 `Interval varies` 가 아니라
+#      `Interval 30 d` 다. W(1개월) ~= H(30일) 관계는 Alibaba 설정과 같다.
+#
+#   2. validation 구간
+#      원문에는 없다. 3개월 전부 학습이고 임곗값은 고정 FPR 로 정한다.
+#      여기서는 early stopping 과 임곗값 선정에 1개월을 떼어 쓴다.
+#      그만큼 학습 구간이 원문보다 짧다.
+#
+#   3. observation window
+#      원문은 학습 경계 직전 n일의 healthy 표본을 ambiguous 로 보고 버린다.
+#      여기서는 embargo(=horizon)가 그 구간을 통째로 비운다. 목적은 같고
+#      적용 범위가 다르다.
+#
+#   4. run 수
+#      원문은 H1 15 runs / S1 37 runs. 여기서는 n_folds 로 정한다.
+#      전부 돌리려면 split.n_folds 를 null 로 두면 된다.
+
+experiment: rodman
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/lightgbm.yaml
+  - configs/models/xgboost.yaml
+
+seeds: [42]
+folds: null
+
+overrides:
+  # --- 프로토콜 ---
+  split.train_window: rolling
+  split.train_months: 3
+  split.min_train_months: 3
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 24
+  split.min_test_failures: 1
+  split.min_val_failures: 1
+
+  # --- horizon (자동 결정 대신 고정) ---
+  labeling.horizon_days: 30
+
+  # --- 평가 ---
+  evaluation.disk_level.rule: or # RODMAN 은 시점 조건을 걸지 않는다
+  evaluation.disk_level.window_days: null # 테스트 달 전체가 한 창
+  evaluation.disk_level.ground_truth: calendar
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.04
+
+  # --- 모집단 ---
+  features.train_sampling.strategy: none
+
+output_root: "${project_root}/runs"

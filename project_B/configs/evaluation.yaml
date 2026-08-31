@@ -1,0 +1,98 @@
+# 평가 설정.
+#
+# 두 층으로 평가한다.
+#
+#  1) row 단위 (HDD-일 표본)
+#     학습에 쓴 라벨을 그대로 채점한다. threshold 없는 랭킹 지표를 포함한다.
+#
+#  2) 디스크 단위 OR 집계
+#     선행연구 계열 B의 표준 집계다. test 월 안에서 한 번이라도 양성으로
+#     지목되면 그 디스크를 양성으로 본다.
+#       Murray et al. (2005)   multiple-instance 정식화
+#       LightGBM + CID (2021)  Algorithm 1
+#       LSTM specificity(2020) "If there are alarm records in the sequence"
+#
+# 주의: 최초 alarm 시점과 lead time 기반 운영 평가는 project_A의 주제다.
+# 여기서는 days_in_advance를 기술 통계로만 남기고 모델 선정에는 쓰지 않는다.
+
+row_level:
+  metrics: [pr_auc, roc_auc, precision, recall, f1, mcc, brier]
+
+disk_level:
+  # 일별 예측을 혼동행렬 한 칸으로 접는 규칙.
+  #
+  #   on_time (기본)
+  #     out        = horizon 밖(y=0 행) 알람 >= 1
+  #     in         = horizon 안(y=1 행) 알람 >= 1
+  #     has_window = 창 안에 y=1 행이 있는가
+  #
+  #     out                       -> FP   구간 밖에서 울렸다
+  #     ~out &  in                -> TP   구간 안에서만 울렸다
+  #     ~out & ~in &  has_window  -> FN   구간이 있는데 안 울렸다
+  #     ~out & ~in & ~has_window  -> TN   구간도 없고 안 울렸다
+  #
+  #   or
+  #     창 안에 알람이 하나라도 있으면 양성 (선행연구 계열 B 표준 집계)
+  rule: on_time
+
+  # 알람 자체의 정의.
+  #   any:         하루라도 임곗값을 넘으면 알람
+  #   consecutive: k일 연속으로 넘어야 알람
+  aggregation: any
+  consecutive_k: 2
+
+  # 집계 창 W.
+  #   null:    평가 구간 전체를 한 창으로 (기본값. test 1개월)
+  #   horizon: labeling.horizon_days 와 같게
+  #   <정수>:  일수 지정
+  #
+  # rule: on_time 에서 W <= H 로 두면 창 안 모든 행이 고장 H일 이내가 되어
+  # horizon 밖 알람이 존재할 수 없고 규칙이 OR 로 붕괴한다. 그 조합은 막힌다.
+  window_days: null
+
+  # rule: or 에서만 쓴다. 정답을 접는 규칙.
+  #   calendar : 그 창의 달력 구간 안에 실제 고장일이 있는 디스크만 양성.
+  #              RODMAN 정의 — "the total number of actual disk failures in
+  #              one-month testing".
+  #   label_or : 창 안 표본의 양성 라벨을 OR 한다.
+  ground_truth: label_or
+
+  metrics: [precision, recall, f1, far, detection_rate]
+
+  # 기술 통계로만 기록한다 (모델 선정에 사용하지 않음).
+  descriptive: [days_in_advance_median, alarm_count_per_disk]
+
+# threshold는 validation에서만 고른다. test는 절대 보지 않는다.
+threshold:
+  # max_f1 | precision_floor | recall_floor | fixed_fpr | fixed_disk_far
+  #
+  # fixed_disk_far 는 디스크 단위 오탐률을 고정하고 나머지를 읽는다.
+  # RODMAN(Alibaba 0.1% / Backblaze 4.0%)과 StreamDFP(1%)가 쓰는 방식이고,
+  # "매일 알람" 같은 전략이 원천적으로 막힌다. fixed_fpr 은 행 단위라 분모가
+  # 다르다는 점에 주의.
+  policy: max_f1
+  precision_floor: 0.30
+  recall_floor: 0.50
+  fixed_fpr: 0.001
+  fixed_disk_far: 0.04
+  # 후보 threshold 격자
+  n_grid: 500
+
+bootstrap:
+  enabled: true
+  n_resamples: 1000
+  # 디스크 단위로 resample한다. row 단위 resample은 같은 디스크의 행이
+  # 독립이 아니므로 신뢰구간을 과도하게 좁게 만든다.
+  unit: disk
+  ci: 0.95
+  seed: 42
+
+# 최종 모델 선정 규칙. 실험 시작 전에 고정한다.
+selection:
+  primary: val_pr_auc_mean # 1차 기준
+  penalize_variance: true # fold 간 표준편차가 크면 불리하게
+  variance_weight: 1.0 # score = mean - w * std
+  near_tie_margin: 0.01 # 이 차이 안이면 near-tie로 본다
+  tiebreakers: [val_recall_at_precision_floor, model_complexity]
+  # test는 선정에 사용하지 않는다. 보고에만 쓴다.
+  test_used_for_selection: false

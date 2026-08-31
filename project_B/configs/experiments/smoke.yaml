@@ -1,0 +1,35 @@
+# 파이프라인 배선 점검용 최소 실험.
+#
+# 결과를 논문에 쓰지 않는다. 경로/스키마/누출 검사/artifact 저장이 끝까지
+# 도는지만 확인한다.
+
+experiment: smoke
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/lightgbm.yaml
+  - configs/models/xgboost.yaml
+  - configs/models/lstm.yaml
+  - configs/models/gru.yaml
+  - configs/models/tcn.yaml
+  - configs/models/transformer.yaml
+
+seeds: [42]
+folds: [0]
+
+overrides:
+  split.n_folds: 1
+  features.train_sampling.strategy: stride
+  features.train_sampling.negative_stride: 30
+  models.lightgbm.params.n_estimators: 200
+
+output_root: "${project_root}/runs"

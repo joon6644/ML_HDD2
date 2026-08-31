@@ -1,0 +1,18 @@
+# 로지스틱 회귀. 선형 기준선이다. SMART 원시값은 자릿수가 제각각이라
+# (전원인가 시간 수만 vs 재할당 섹터 수십) 표준화가 반드시 필요하다.
+name: logreg
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.linear_model.LogisticRegression
+  kwargs:
+    max_iter: 300
+    C: 1.0
+    solver: lbfgs
+
+training:
+  scale_inputs: true
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

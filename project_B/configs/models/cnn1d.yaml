@@ -1,0 +1,29 @@
+# 평범한 1D CNN. TCN 과의 차이는 dilation 과 residual 이 없다는 것이다.
+# causal padding 은 유지해 TCN 과 조건을 맞춘다.
+
+name: cnn1d
+family: sequence
+class: hddpred.models.sequence.CNN1DModel
+
+params:
+  channels: [64, 128, 64]
+  kernel_size: 5
+  dropout: 0.2
+  pooling: last
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  # 손실. 설명은 configs/models/lstm.yaml 참고.
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pr_auc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

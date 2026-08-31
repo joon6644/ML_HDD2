@@ -1,0 +1,16 @@
+# 선형 판별 분석. 로지스틱 회귀와 같은 선형 경계지만 추정 방식이 다르다.
+name: lda
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.discriminant_analysis.LinearDiscriminantAnalysis
+  kwargs:
+    solver: lsqr
+    shrinkage: auto
+
+training:
+  scale_inputs: true
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

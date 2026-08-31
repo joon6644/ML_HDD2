@@ -1,0 +1,35 @@
+# 오토인코더 이상탐지.
+#
+# 정상 개체(창 끝까지 고장이 확인되지 않은 디스크)의 행만 학습하고,
+# 재구성 오차를 이상 점수로 쓴다. 점수는 확률이 아니므로 Brier score 는
+# 이 모델에서 해석하지 않는다.
+#
+# 병목(latent_dim)이 입력(84피처)보다 충분히 좁아야 항등 사상으로
+# 도망가지 않는다.
+
+name: autoencoder
+family: tabular
+class: hddpred.models.autoencoder.AutoEncoderModel
+
+params:
+  hidden_dims: [64, 32]
+  latent_dim: 16
+  activation: relu
+  batch_norm: true
+  dropout: 0.0
+
+training:
+  epochs: 30
+  batch_size: 4096
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  early_stopping_patience: 5
+
+  # val_loss   정상 val 행의 재구성 오차. 라벨을 쓰지 않는다 (기본).
+  # val_pr_auc 라벨 기반. 탐지 성능을 직접 겨냥하지만 비지도 전제가 약해진다.
+  early_stopping_metric: val_loss
+
+  # 스케일러는 이 모델이 직접 들고 있는다. train 의 정상 행에서만 적합시킨다.
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

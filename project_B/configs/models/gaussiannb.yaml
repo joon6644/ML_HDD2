@@ -1,0 +1,16 @@
+# 가우시안 나이브 베이즈. 피처 독립 가정이 SMART 에서 강하게 깨지므로
+# 하한 기준선으로만 쓴다.
+name: gaussiannb
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+
+params:
+  estimator: sklearn.naive_bayes.GaussianNB
+  kwargs:
+    var_smoothing: 1.0e-9
+
+training:
+  scale_inputs: true
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

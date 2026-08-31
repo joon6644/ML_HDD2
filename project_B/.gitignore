@@ -1,0 +1,36 @@
+# Virtual Environment
+.venv/
+venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp/
+
+# 파생 데이터는 전부 재생성 가능하므로 추적하지 않는다.
+# provenance.json과 manifest는 추적한다 (재현에 필요한 메타데이터).
+data/**
+!data/**/
+!data/**/provenance.json
+!data/**/*manifest.json
+!data/**/.gitkeep
+
+# 실험 artifact.
+# 체크포인트와 예측 parquet 은 무겁고 재생성 가능하므로 추적하지 않는다.
+# fold_metrics.json / threshold.json / resolved_config.yaml / model_meta.json
+# 은 작고 재현에 필요하므로 추적한다.
+# model.* 는 model.pt/model.txt/model.ubj 만 잡고 model_meta.json 은 남긴다.
+# MLflow 색인. run 디렉터리에서 언제든 재생성할 수 있다.
+mlflow.db
+mlartifacts/
+
+runs/**/predictions_*.parquet
+runs/**/model/model.*
+runs/**/*.pkl
+
+# 편집기 / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

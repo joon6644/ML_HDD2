@@ -1,0 +1,93 @@
+# 상위 8종 x 시드 5개 — 한 번 학습, 세 달 각각 예측.
+#
+# zoo_3month 와 experiment 이름이 같다. 같은 runs 트리에 시드만 늘려 쌓기
+# 위해서다. seed 42 는 이미 있으므로 재사용되고 43~46 만 새로 돈다.
+#
+#   train  2018-08-01 ~ 2025-10-31   (관측 전 구간)
+#   val    2025-11
+#   test   2025-12 · 2026-01 · 2026-02   <- 재학습 없이 세 달을 각각 채점
+#
+# zoo_single 과 같은 프로토콜인데 채점 달이 셋이다. 고장이 14대에서 47대로
+# 늘어 recall 눈금이 7.1%p 에서 2.1%p 로 세밀해진다.
+#
+# 구현: split 을 3 fold 로 만들되 fold 0(test 2025-12) 만 학습한다.
+# 나머지 두 달은 저장된 모델로 사후 채점한다 (scripts 없이 별도 스크립트).
+# 그래야 "하나의 모델"이라는 성질이 유지된다.
+#
+# ⚠ 세 달의 난이도가 같지 않다. 모델은 2025-10 까지만 보므로 2025-12 는
+#   2개월, 2026-02 는 4개월 뒤를 예측하는 셈이다. 그 격차 자체가 관측 대상이다.
+
+experiment: zoo_3month
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+models:
+  # 상위 5종 + 계열별 1등의 합집합. @1%(풀링) 기준.
+  - configs/models/randomforest.yaml     # 배깅 1등 · 전체 1위 (32/47)
+  - configs/models/xgboost.yaml          # 부스팅 1등 (31)
+  - configs/models/lightgbm.yaml         # (30)
+  - configs/models/transformer.yaml      # 주의집중 1등 (28)
+  - configs/models/tabresnet.yaml        # 테이블DL 1등 (28)
+  - configs/models/gru.yaml              # 순환 1등 (28)
+  - configs/models/cnn1d.yaml            # 합성곱 1등 (27)
+  - configs/models/autoencoder.yaml      # 이상탐지 1등 (24)
+  #
+  # 단일트리(decisiontree) 와 선형(logreg) 은 뺐다 — 기준선 역할은
+  # 29종 표에서 이미 했고, 시드로 재볼 만한 상위 후보가 아니다.
+  #
+  # gaussiannb / lda 는 제외했다. 네 FAR 지점에서 알람 집합이 같아
+  # (실제 FAR 8.41% / 3.18%) 분위수로 임곗값을 못 잡는다. 점수에 동점
+  # 덩어리가 커서 생기는 문제이고, 그 상태로는 시드를 늘려도 의미가 없다.
+
+seeds: [42, 43, 44, 45, 46]
+folds: [0]
+warm_start: false
+
+overrides:
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  features.train_sampling.strategy: stride
+  features.train_sampling.negative_stride: 30
+
+  evaluation.disk_level.rule: or
+  evaluation.disk_level.ground_truth: calendar
+  evaluation.disk_level.window_days: null
+
+  models.gru.training.epochs: 30
+  models.bigru.training.epochs: 30
+  models.bilstm.training.epochs: 30
+  models.attnrnn.training.epochs: 30
+  models.fcn.training.epochs: 30
+  models.resnet1d.training.epochs: 30
+  models.inceptiontime.training.epochs: 30
+  models.lstmfcn.training.epochs: 30
+  models.tabresnet.training.epochs: 30
+  models.fttransformer.training.epochs: 30
+  models.bigru.training.epochs: 30
+  models.bilstm.training.epochs: 30
+  models.lstm.training.epochs: 30
+  models.cnn1d.training.epochs: 30
+  models.tcn.training.epochs: 30
+  models.transformer.training.epochs: 30
+
+output_root: "${project_root}/runs"

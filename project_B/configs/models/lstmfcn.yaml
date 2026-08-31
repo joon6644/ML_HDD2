@@ -1,0 +1,26 @@
+# LSTM-FCN (Karim et al. 2018). 순환 분기와 합성곱 분기를 이어 붙인다.
+name: lstmfcn
+family: sequence
+class: hddpred.models.sequence.LSTMFCNModel
+
+params:
+  hidden_size: 128
+  dropout: 0.2
+  channels: [128, 256, 128]
+  kernels: [7, 5, 3]
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pr_auc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true
