@@ -92,10 +92,21 @@ def rescale(part, scaler):
 
 
 def score_month(model, part, rule, thresholds=None):
-    """한 달을 채점한다. 디스크 점수는 그 달 행 점수의 최댓값(OR 집계)이다.
+    """한 달을 채점한다. 모든 지표가 디스크 단위다.
+
+    디스크의 순위 점수는 rule 이 정한다. 그래야 ROC/PR 곡선의 임의의 점이
+    아래 혼동행렬과 정확히 같은 판정을 뜻한다 — Recall@FAR 과 ROC-AUC 가
+    같은 곡선의 두 읽기가 되고, 논문 표에서 나란히 놓을 수 있다.
+
+        in_horizon  고장 디스크는 정답 구간(y=1 행) 안 최댓값.
+                    미고장 디스크는 그 달 전체 최댓값 (아무 때나 울리면 FP).
+        or          둘 다 그 달 전체 최댓값.
 
     thresholds: {라벨: 임곗값}. None 이면 그 달 정상 디스크 상위 f% 로 잡는다.
     """
+    if rule not in ("in_horizon", "or"):
+        raise ValueError(f"지원하지 않는 rule: {rule!r} (in_horizon | or)")
+
     frame = pd.DataFrame(
         {"serial": part.serial, "y": part.y, "score": model.predict_proba(part)}
     )
@@ -103,19 +114,23 @@ def score_month(model, part, rule, thresholds=None):
     disk_score = grouped["score"].max()
     # 정답 구간(고장 H일 전) 을 가진 디스크. 라벨이 곧 구간의 정의다.
     has_window = grouped["y"].max().astype(bool)
-    inside = frame[frame["y"] == 1].groupby("serial")["score"].max()
-    inside = inside.reindex(disk_score.index).fillna(-np.inf)
 
+    if rule == "or":
+        rank = disk_score
+    else:
+        inside = frame[frame["y"] == 1].groupby("serial")["score"].max()
+        # has_window 인 디스크에는 y=1 행이 반드시 있으므로 결측이 나지 않는다.
+        rank = disk_score.where(~has_window, inside.reindex(disk_score.index))
+
+    actual = has_window.astype(int).to_numpy()
     out = {
         "n_failed": int(has_window.sum()),
         "n_healthy": int((~has_window).sum()),
-        "roc_auc": float(roc_auc_score(has_window.astype(int), disk_score.to_numpy())),
-        "pr_auc": float(
-            average_precision_score(has_window.astype(int), disk_score.to_numpy())
-        ),
+        "roc_auc": float(roc_auc_score(actual, rank.to_numpy())),
+        "pr_auc": float(average_precision_score(actual, rank.to_numpy())),
     }
     if thresholds is None:
-        healthy_scores = disk_score[~has_window].to_numpy()
+        healthy_scores = rank[~has_window].to_numpy()
         thresholds = {
             target: float(np.quantile(healthy_scores, 1.0 - target))
             for target in FAR_TARGETS
@@ -123,20 +138,13 @@ def score_month(model, part, rule, thresholds=None):
 
     out["cells"] = {}
     for label, threshold in thresholds.items():
-        alarm_any = disk_score >= threshold
-        alarm_in = inside >= threshold
-        if rule == "in_horizon":
-            detected = has_window & alarm_in
-        elif rule == "or":
-            detected = has_window & alarm_any
-        else:
-            raise ValueError(f"지원하지 않는 rule: {rule!r} (in_horizon | or)")
+        alarm = rank >= threshold
         out["cells"][label] = {
             "threshold": float(threshold),
-            "tp": int(detected.sum()),
-            "fn": int((has_window & ~detected).sum()),
-            "fp": int((~has_window & alarm_any).sum()),
-            "tn": int((~has_window & ~alarm_any).sum()),
+            "tp": int((has_window & alarm).sum()),
+            "fn": int((has_window & ~alarm).sum()),
+            "fp": int((~has_window & alarm).sum()),
+            "tn": int((~has_window & ~alarm).sum()),
         }
     return out
 
