@@ -1,0 +1,88 @@
+# 후보 모델 선정 — 불균형 처리 없음 (notion.md §3.3, §4 표의 Baseline 행).
+#
+#   train  2018-08-01 ~ 2025-10-31   (관측 전 구간)
+#   val    2025-11                   <- 임곗값만 여기서 고른다
+#   test   2025-12 · 2026-01 · 2026-02   <- 재학습 없이 세 달을 각각 채점
+#
+# zoo_3month 와 같은 단발 프로토콜이다. split 을 3 fold 로 만들되 fold 0 만
+# 학습하고, 나머지 두 달은 저장된 모델로 사후 채점한다
+# (scripts/export_results.py --threshold-source validation).
+# 그래야 "하나의 모델"이라는 성질이 유지된다.
+#
+# ⚠ 세 달의 난이도가 같지 않다. 모델은 2025-10 까지만 보므로 2025-12 는
+#   2개월, 2026-02 는 4개월 뒤를 예측하는 셈이다.
+#
+# ---------------------------------------------------------------------------
+# 이 실험이 고정하는 것: 불균형 처리를 하나도 하지 않는다.
+#
+#   표본     features.train_sampling.strategy: none   (전 구간 전 표본, 재조정 없음)
+#   손실     mlp.training.loss: bce                   (focal 은 불균형 처리다)
+#            mlp.training.auto_pos_weight: false
+#   가중     xgboost / lightgbm  auto_scale_pos_weight: false
+#            randomforest        auto_class_weight: false
+#
+# 모델 yaml 의 기본값이 이미 전부 false 지만 여기서 다시 못 박는다. 이 실험의
+# 결론이 "불균형 처리 없음"이라는 조건에 달려 있어서, 나중에 모델 yaml 기본값이
+# 바뀌어도 이 파일만 보면 조건이 확정되어야 하기 때문이다.
+#
+# 지표: val 에서 디스크 단위 FAR 1% 로 임곗값을 고정하고, test 에서 recall 과
+# ROC-AUC 를 읽는다. ROC-AUC 는 임곗값과 무관하므로 제약의 영향을 받지 않는다.
+# ---------------------------------------------------------------------------
+
+experiment: cand_baseline
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/randomforest.yaml
+  - configs/models/xgboost.yaml
+  - configs/models/lightgbm.yaml
+  - configs/models/mlp.yaml
+
+seeds: [42]
+folds: [0] # fold 0 만 학습한다. 나머지 두 달은 export_results.py 가 채점한다.
+warm_start: false
+
+overrides:
+  # --- 단발 프로토콜 (zoo_3month 와 동일) ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 불균형 처리 없음 ---
+  features.train_sampling.strategy: none
+
+  models.randomforest.training.auto_class_weight: false
+  models.xgboost.training.auto_scale_pos_weight: false
+  models.lightgbm.training.auto_scale_pos_weight: false
+  models.mlp.training.loss: bce
+  models.mlp.training.auto_pos_weight: false
+
+  # --- 임곗값: val 에서 디스크 단위 FAR 1% ---
+  # 행 단위 fixed_fpr 과 분모가 다르다. 여기 분모는 미고장 디스크 수다.
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+
+output_root: "${project_root}/runs"

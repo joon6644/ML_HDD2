@@ -7,9 +7,20 @@
 fold 0 에서 학습한 모델 하나로 split manifest 의 모든 test 월을 채점하므로,
 "한 번 학습해서 여러 달을 예측한다"는 프로토콜이 그대로 재현된다.
 
-임곗값은 달마다 "정상 디스크 상위 f%" 로 잡는다. 운영 예산이 달 단위로
-배정되기 때문이고, 세 달을 통으로 잡으면 모델이 낡으며 점수 분포가 밀리는
-것이 FAR 불균형으로 새어 나온다.
+임곗값을 잡는 방법이 둘이다. --threshold-source 로 고른다.
+
+    month_quantile (기본)
+        달마다 "정상 디스크 상위 f%" 로 잡는다. 운영 예산이 달 단위로
+        배정되기 때문이고, 세 달을 통으로 잡으면 모델이 낡으며 점수 분포가
+        밀리는 것이 FAR 불균형으로 새어 나온다. 다만 그 달의 정상 디스크
+        점수를 봐야 정해지므로 test 를 참조한다.
+
+    validation
+        run 디렉터리의 threshold.json 을 그대로 쓴다. runner 가 validation
+        에서만 골라 둔 값이라 test 를 전혀 참조하지 않는다. 세 달에 같은
+        임곗값이 적용되므로 실제 FAR 은 달마다 목표에서 벗어난다. 그 벗어남
+        자체가 "val 에서 고른 운영점이 이후 달에 얼마나 유지되는가"이고,
+        long CSV 의 far 열에 그대로 남는다.
 
 내보내는 파일 두 개:
 
@@ -42,9 +53,14 @@ from hddpred import paths  # noqa: E402
 from hddpred.evaluation import metrics as metrics_mod  # noqa: E402
 from hddpred.experiments.runner import Pipeline, prepare_drive  # noqa: E402
 from hddpred.features import fold as fold_mod  # noqa: E402
+from hddpred.inference import threshold as threshold_mod  # noqa: E402
 from hddpred.models import registry  # noqa: E402
 
 FAR_TARGETS = [0.005, 0.01, 0.02, 0.04]
+
+# threshold.policy -> 그 정책이 선언한 명목 목표 오탐률의 키.
+# far_target 열에 무엇을 적을지 정하는 데만 쓴다.
+POLICY_TARGET_KEY = {"fixed_disk_far": "fixed_disk_far", "fixed_fpr": "fixed_fpr"}
 
 
 def load_part(prepared, pipeline, family, start, end, horizon, threads):
@@ -75,8 +91,11 @@ def rescale(part, scaler):
     )
 
 
-def score_month(model, part, rule):
-    """한 달을 채점한다. 디스크 점수는 그 달 행 점수의 최댓값(OR 집계)이다."""
+def score_month(model, part, rule, thresholds=None):
+    """한 달을 채점한다. 디스크 점수는 그 달 행 점수의 최댓값(OR 집계)이다.
+
+    thresholds: {라벨: 임곗값}. None 이면 그 달 정상 디스크 상위 f% 로 잡는다.
+    """
     frame = pd.DataFrame(
         {"serial": part.serial, "y": part.y, "score": model.predict_proba(part)}
     )
@@ -95,9 +114,15 @@ def score_month(model, part, rule):
             average_precision_score(has_window.astype(int), disk_score.to_numpy())
         ),
     }
-    healthy_scores = disk_score[~has_window].to_numpy()
-    for target in FAR_TARGETS:
-        threshold = np.quantile(healthy_scores, 1.0 - target)
+    if thresholds is None:
+        healthy_scores = disk_score[~has_window].to_numpy()
+        thresholds = {
+            target: float(np.quantile(healthy_scores, 1.0 - target))
+            for target in FAR_TARGETS
+        }
+
+    out["cells"] = {}
+    for label, threshold in thresholds.items():
         alarm_any = disk_score >= threshold
         alarm_in = inside >= threshold
         if rule == "in_horizon":
@@ -106,7 +131,8 @@ def score_month(model, part, rule):
             detected = has_window & alarm_any
         else:
             raise ValueError(f"지원하지 않는 rule: {rule!r} (in_horizon | or)")
-        out[target] = {
+        out["cells"][label] = {
+            "threshold": float(threshold),
             "tp": int(detected.sum()),
             "fn": int((has_window & ~detected).sum()),
             "fp": int((~has_window & alarm_any).sum()),
@@ -120,11 +146,23 @@ def main() -> int:
     parser.add_argument("experiment", help="configs/experiments/*.yaml 의 이름")
     parser.add_argument("--out", default=None, help="출력 접두사 (기본 results/<이름>)")
     parser.add_argument("--rule", default=None, help="in_horizon | or (기본은 설정값)")
+    parser.add_argument(
+        "--threshold-source",
+        default="month_quantile",
+        choices=["month_quantile", "validation"],
+        help="month_quantile: 달마다 정상 디스크 상위 f%% | "
+        "validation: run 의 threshold.json (val 에서 고른 값) 을 세 달에 그대로",
+    )
     args = parser.parse_args()
 
     cfg = cfg_mod.load_yaml(paths.CONFIG_DIR / "experiments" / f"{args.experiment}.yaml")
     pipeline = Pipeline.from_experiment(cfg)
     rule = args.rule or pipeline.evaluation["disk_level"].get("rule", "in_horizon")
+    from_validation = args.threshold_source == "validation"
+    # far_target 열에 적을 명목 목표. validation 소스에서만 쓴다.
+    policy_cfg = pipeline.evaluation["threshold"]
+    target_key = POLICY_TARGET_KEY.get(policy_cfg.get("policy", "max_f1"))
+    nominal_target = float(policy_cfg[target_key]) if target_key else ""
     horizon = int(pipeline.labeling["horizon_days"])
     threads = int(pipeline.preprocessing.get("duckdb", {}).get("threads", 8))
     seeds = [int(s) for s in cfg["seeds"]]
@@ -137,6 +175,10 @@ def main() -> int:
     for drive_name in cfg["drives"]:
         prepared = prepare_drive(drive_name, pipeline)
         folds = sorted(prepared.folds, key=lambda f: f.fold)
+        # 채점하는 모델은 항상 fold 0 에서 학습한 그 하나다. 달마다 fold 의
+        # train 창을 적으면 "2026-02 행의 모델은 2025-12 까지 봤다"는 거짓이
+        # CSV 에 남는다. 학습 창은 fold 0 것으로 고정해서 적는다.
+        trained = folds[0]
         cache = {}
         for model_path in cfg["models"]:
             model_cfg = registry.load_model_config(model_path)
@@ -152,6 +194,10 @@ def main() -> int:
                     fold_mod.Scaler.from_state_dict(record["scaler"])
                     if record.get("scaler") else None
                 )
+                thresholds = None
+                if from_validation:
+                    chosen = threshold_mod.load(run_dir)
+                    thresholds = {nominal_target: float(chosen["threshold"])}
                 for fold in folds:
                     start, end = fold.window("test")
                     key = (drive_name, family, start)
@@ -162,17 +208,18 @@ def main() -> int:
                     part = cache[key]
                     if family == "sequence":
                         part = rescale(part, scaler)
-                    scored = score_month(model, part, rule)
-                    for target in FAR_TARGETS:
-                        cell = scored[target]
+                    scored = score_month(model, part, rule, thresholds)
+                    for target, cell in scored["cells"].items():
                         tp, fn, fp, tn = (cell[k] for k in ("tp", "fn", "fp", "tn"))
                         long_rows.append({
                             "experiment": experiment, "drive": drive_name,
                             "model": name, "family": family, "seed": seed,
                             "test_month": fold.test_month,
-                            "train_start": fold.train_start, "train_end": fold.train_end,
+                            "train_start": trained.train_start,
+                            "train_end": trained.train_end,
                             "rule": rule, "horizon_days": horizon,
-                            "far_target": target,
+                            "threshold_source": args.threshold_source,
+                            "far_target": target, "threshold": cell["threshold"],
                             "n_failed": scored["n_failed"], "n_healthy": scored["n_healthy"],
                             "tp": tp, "fn": fn, "fp": fp, "tn": tn,
                             "recall": tp / (tp + fn) if tp + fn else 0.0,
@@ -197,7 +244,10 @@ def main() -> int:
     # --- 요약: 달을 풀링하고 시드로 평균 -----------------------------------
     frame = pd.DataFrame(long_rows)
     summary = []
-    keys = ["experiment", "drive", "model", "family", "rule", "far_target"]
+    keys = [
+        "experiment", "drive", "model", "family",
+        "rule", "threshold_source", "far_target",
+    ]
     for key, group in frame.groupby(keys, sort=False):
         per_seed = []
         for _, seed_group in group.groupby("seed"):

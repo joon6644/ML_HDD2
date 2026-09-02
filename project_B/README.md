@@ -182,8 +182,15 @@ python scripts/run_experiment.py configs/experiments/model_comparison.yaml
 # 3b) RODMAN 평가 방식 재현 (rolling 3개월 -> 다음 1개월, 고정 FAR 4%)
 python scripts/run_experiment.py configs/experiments/rodman.yaml
 
+# 3c) 후보 모델 선정 — 불균형 처리 없음 (rf / xgb / lgbm / mlp, seed 42)
+python scripts/run_experiment.py configs/experiments/cand_baseline.yaml
+
 # 4) 집계와 모델 선정
 python scripts/aggregate_results.py model_comparison
+
+# 4b) 학습된 모델을 재채점해 CSV 로. --threshold-source validation 이면
+#     val 에서 고른 임곗값을 세 달에 그대로 적용한다 (test 미참조).
+python scripts/export_results.py cand_baseline --threshold-source validation
 
 # 테스트
 python -m pytest
