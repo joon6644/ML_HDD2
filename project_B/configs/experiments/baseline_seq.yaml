@@ -1,0 +1,102 @@
+# 모델 셀렉 확장 — 입력 윈도우를 갖는 시퀀스 계열.
+#
+# baseline.yaml 과 조건이 완전히 같다. 표집(strategy: none, 2,494만 행), 분할,
+# 라벨, in_horizon 판정, val 에서 잡는 1% 운영점, 시드 42 전부 동일하다.
+#
+# 입력 변수도 같다. sequence.columns 가 raw_and_age 라 tabular 베이스라인과
+# 똑같은 20개(smart_*_raw 18 + age 2)를 쓴다. 유일한 차이는 그 20개를
+# 하루치로 보느냐(tabular) 30일치로 보느냐(sequence)다.
+#
+# lookback 이 창 경계를 넘는 문제:
+#   load_sequence 는 행렬을 start-(lookback-1) 부터 읽고, 채점 대상은
+#   in_window 로 [start, end] 만 남긴다. 즉 2025-12-01 표본은 11-02~12-01 의
+#   실제 30일을 본다. 패딩으로 때우지 않는다.
+#
+#   시간축으로 뒤로만 간다. 12-01 을 채점할 때 보는 11월은 예측 시점에 이미
+#   관측된 데이터다. 누출이 아니다.
+#
+#   평가 모집단도 같다 (실측: n_val 206,048 로 tabular 와 동일). lookback 을
+#   못 채우는 표본을 버리지 않고 short_history: pad 로 살리기 때문이다.
+#
+#   tabular 의 diff/rolling 파생도 피처 레이어를 전 구간에서 한 번에 만들어
+#   똑같이 경계를 넘어 뒤로 간다. 두 계열이 대칭이다.
+#
+# lookback 은 features.yaml 의 기본값 30 을 그대로 둔다. 줄이면 빨라지지만
+# (연산이 L 에 거의 비례, transformer 는 O(L^2)) 그건 하이퍼파라미터 조정이라
+# 베이스라인 원칙에 어긋난다.
+#
+# 비용: 84.5만 표본 lookback 30 에서 GPU 로 140~235s 였다 (zoo 실측).
+#       2,494만 행은 29.5배라 5종에 8시간 안팎을 잡는다.
+
+experiment: baseline_seq
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/gru.yaml
+  - configs/models/lstm.yaml
+  - configs/models/cnn1d.yaml
+  - configs/models/tcn.yaml
+  - configs/models/transformer.yaml
+
+seeds: [42]
+folds: [0]
+warm_start: false
+
+overrides:
+  # --- 분할 (zoo_3month 와 동일) ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  # --- 라벨 (zoo_3month 와 동일) ---
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 파생변수 없음 ---
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+
+  # --- 불균형 처리 없음 ---
+  features.train_sampling.strategy: none
+  # 불균형 처리 없음 — 순수 BCE, 손실 가중 없음.
+  models.transformer.training.loss: bce
+  models.transformer.training.auto_pos_weight: false
+  models.tcn.training.loss: bce
+  models.tcn.training.auto_pos_weight: false
+  models.cnn1d.training.loss: bce
+  models.cnn1d.training.auto_pos_weight: false
+  models.lstm.training.loss: bce
+  models.lstm.training.auto_pos_weight: false
+  models.gru.training.loss: bce
+  models.gru.training.auto_pos_weight: false
+
+  # --- 판정 (zoo_3month 와 동일) ---
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+
+  # --- 운영점 ---
+  # 모델 선정 제약은 디스크 단위 오탐률 1% 하나다. val 에서만 잡는다.
+  # max_f1 은 양성률 0.02% 구간에서 무너지므로 쓰지 않는다.
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+
+output_root: "${project_root}/runs"

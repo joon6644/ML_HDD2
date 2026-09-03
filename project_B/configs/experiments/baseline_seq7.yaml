@@ -1,0 +1,103 @@
+# 모델 셀렉 확장 — 입력 윈도우를 갖는 시퀀스 계열 (lookback 7일).
+#
+# baseline.yaml(tabular 4종) 과 조건이 완전히 같다. 표집(strategy: none,
+# 2,494만 행), 분할, 라벨, in_horizon 판정, val 에서 잡는 1% 운영점, 시드 42
+# 전부 동일하다.
+#
+# 입력 변수도 같다. sequence.columns 가 raw_and_age 라 tabular 베이스라인과
+# 똑같은 20개(smart_*_raw 18 + age 2)를 쓴다. 유일한 차이는 그 20개를
+# 하루치로 보느냐(tabular) 7일치로 보느냐(sequence)다.
+#
+# lookback 이 창 경계를 넘는 것에 대하여:
+#   load_sequence 는 행렬을 start-(lookback-1) 부터 읽고, 채점 대상은
+#   in_window 로 [start, end] 만 남긴다. 2025-12-01 표본은 11-25~12-01 의
+#   실제 7일을 본다. 시간축으로 뒤로만 가므로 예측 시점에 이미 관측된
+#   데이터이고, 누출이 아니다.
+#
+#   평가 모집단도 같다. lookback 을 못 채우는 표본을 버리지 않고
+#   short_history: pad 로 살린다 (L=30 실측에서 test 의 0.25% 뿐이었고,
+#   그마저 창 경계가 아니라 관측 공백으로 segment 가 새로 시작된 경우다).
+#
+#   tabular 의 diff/rolling 파생도 피처 레이어를 전 구간에서 한 번에 만들어
+#   똑같이 경계를 넘어 뒤로 간다. 두 계열이 대칭이다.
+#
+# lookback 은 스윕한다 (7 / 14 / 30).
+#   30 이 features.yaml 에 적혀 있었지만 그것도 근거 없이 정한 값이라
+#   "기본값이니 조정하지 않았다" 는 방어가 성립하지 않는다. 셋 다 임의값이다.
+#   그래서 하나를 골라 Baseline 이라 부르지 않고 축으로 재서 보고한다.
+#   결과를 보고 이긴 값을 Baseline 행에 넣으면 그게 결과로 고르는 것이다.
+
+experiment: baseline_seq7
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/gru.yaml
+  - configs/models/lstm.yaml
+  - configs/models/cnn1d.yaml
+  - configs/models/tcn.yaml
+
+seeds: [42]
+folds: [0]
+warm_start: false
+
+overrides:
+  # --- 분할 (zoo_3month 와 동일) ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  # --- 라벨 (zoo_3month 와 동일) ---
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 파생변수 없음 ---
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+
+  # --- 입력 윈도우 ---
+  # 스윕 지점. baseline_seq7 / _seq14 / _seq30 이 이 값만 다르다.
+  # 실측(GPU, batch 4096, 채널 21): 4종 합계 L=30 66.1ms -> L=14 36.3ms/배치.
+  features.sequence.lookback_days: 7
+
+  # --- 불균형 처리 없음 ---
+  features.train_sampling.strategy: none
+  # 불균형 처리 없음 — 순수 BCE, 손실 가중 없음.
+  models.tcn.training.loss: bce
+  models.tcn.training.auto_pos_weight: false
+  models.cnn1d.training.loss: bce
+  models.cnn1d.training.auto_pos_weight: false
+  models.lstm.training.loss: bce
+  models.lstm.training.auto_pos_weight: false
+  models.gru.training.loss: bce
+  models.gru.training.auto_pos_weight: false
+
+  # --- 판정 (zoo_3month 와 동일) ---
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+
+  # --- 운영점 ---
+  # 모델 선정 제약은 디스크 단위 오탐률 1% 하나다. val 에서만 잡는다.
+  # max_f1 은 양성률 0.02% 구간에서 무너지므로 쓰지 않는다.
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+
+output_root: "${project_root}/runs"

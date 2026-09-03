@@ -1,0 +1,49 @@
+# 불균형 처리 비교 — arm: none
+#   처리 없음 (전 표본)
+#   기반 모델: mlp (모델 셀렉 결과)
+#   baseline.yaml 과 표집/가중 축 하나만 다르다.
+#   scripts/run_imbalance.py 가 생성한다. 직접 고치지 마라.
+
+experiment: imb_none
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- HGST_20HUH721212ALN604
+models:
+- configs/models/mlp.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  models.mlp.training.loss: bce
+  models.mlp.training.auto_pos_weight: false
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  features.train_sampling.strategy: none
+output_root: ${project_root}/runs

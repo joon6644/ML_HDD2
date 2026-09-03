@@ -1,0 +1,96 @@
+# 후보 모델 4종 베이스라인 — notion.md 3.3 "후보 모델 선정 (rf, xgb, lgbm, mlp)"
+#                              notion.md 4장 표의 [Baseline] 행
+#
+# 이 실험이 정의하는 것은 "아무 처리도 하지 않은 상태"다. 뒤에 올 세 행
+# (+Imbalance / +Feature / Imbalance+Feature) 이 이 지점 대비 얼마를 벌었는지를
+# 읽기 위한 기준선이므로, 성능을 올리는 장치는 하나도 켜지 않는다.
+#
+#   파생변수 없음      diff / rolling / since_start 를 전부 비운다.
+#                      남는 입력은 canonical 의 smart_*_raw 원값 + 나이 2개뿐이다.
+#                      (+Feature 행에서 features.yaml 기본값으로 되살린다)
+#
+#   불균형 처리 없음   train_sampling.strategy: none  -> 학습 창의 모든 행을 쓴다.
+#                      음성 언더샘플링(stride/match_val)도 손실 가중도 걸지 않는다.
+#                      lgbm/xgb 는 auto_scale_pos_weight: false (모델 yaml 기본값),
+#                      rf 는 auto_class_weight: false, mlp 는 focal 대신 순수 BCE.
+#                      (+Imbalance 행에서 표집/가중을 켠다)
+#
+#   튜닝 없음          하이퍼파라미터는 모델 yaml 에 적힌 관례값 그대로다.
+#                      결과를 보고 고친 값은 없다.
+#
+# 분할·판정 프로토콜은 zoo_3month 와 동일하게 고정한다. 여기서 바뀌는 건
+# 입력 피처와 표본 구성뿐이어야 행 간 비교가 성립한다.
+#
+#   train  2018-08-01 ~ 2025-10-31   (전 구간, 표집 없음)
+#   val    2025-11                    (임곗값 선택 전용)
+#   test   2025-12 · 2026-01 · 2026-02  재학습 없이 하나의 모델로 각각 채점
+#
+#   판정   rule: in_horizon — 고장 10일 전 구간 안에서 한 번이라도 울리면 TP,
+#          그 구간에서 안 울리면 FN, 미고장 디스크가 울리면 FP.
+#
+# ⚠ strategy: none 이라 학습 행렬이 2,500만 행 규모다. stride 30 을 쓰던
+#   zoo_3month(83만 행)보다 30배다. 적합 시간이 그만큼 길어지는 것이 정상이고,
+#   그 비용 자체가 [Baseline] 행이 담아야 할 사실이다.
+
+experiment: baseline
+
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+
+drives: [HGST_20HUH721212ALN604]
+
+models:
+  - configs/models/randomforest.yaml
+  - configs/models/xgboost.yaml
+  - configs/models/lightgbm.yaml
+  - configs/models/mlp.yaml
+
+seeds: [42]
+folds: [0]
+warm_start: false
+
+overrides:
+  # --- 분할 (zoo_3month 와 동일) ---
+  split.train_window: expanding
+  split.min_train_months: 1
+  split.val_months: 1
+  split.test_months: 1
+  split.n_folds: 3
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+
+  # --- 라벨 (zoo_3month 와 동일) ---
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+
+  # --- 파생변수 없음 ---
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+
+  # --- 불균형 처리 없음 ---
+  features.train_sampling.strategy: none
+  models.mlp.training.loss: bce
+  models.mlp.training.auto_pos_weight: false
+
+  # --- 판정 (zoo_3month 와 동일) ---
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+
+  # --- 운영점 ---
+  # 모델 선정 제약은 디스크 단위 오탐률 1% 하나다. val 에서만 잡는다.
+  # max_f1 은 양성률 0.02% 구간에서 무너지므로 쓰지 않는다.
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+
+output_root: "${project_root}/runs"

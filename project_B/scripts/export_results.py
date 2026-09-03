@@ -15,6 +15,13 @@ fold 0 에서 학습한 모델 하나로 split manifest 의 모든 test 월을 �
         밀리는 것이 FAR 불균형으로 새어 나온다. 다만 그 달의 정상 디스크
         점수를 봐야 정해지므로 test 를 참조한다.
 
+    val_quantile
+        FAR 목표마다 val 월의 정상 디스크 상위 f% 지점을 임곗값으로 잡고,
+        그 값을 세 test 월에 그대로 적용한다. test 를 전혀 참조하지 않으면서
+        Recall@FAR 을 여러 지점에서 읽을 수 있어 논문 표에 쓰는 소스다.
+        val 에서 f% 였던 운영점이 test 에서 그대로 f% 로 재현되지는 않으므로
+        long CSV 의 far 열에 실제 오탐률이 따로 남는다.
+
     validation
         run 디렉터리의 threshold.json 을 그대로 쓴다. runner 가 validation
         에서만 골라 둔 값이라 test 를 전혀 참조하지 않는다. 세 달에 같은
@@ -56,7 +63,8 @@ from hddpred.features import fold as fold_mod  # noqa: E402
 from hddpred.inference import threshold as threshold_mod  # noqa: E402
 from hddpred.models import registry  # noqa: E402
 
-FAR_TARGETS = [0.005, 0.01, 0.02, 0.04]
+# notion.md 4장 표의 Recall@FAR 행에 맞춘다.
+FAR_TARGETS = [0.001, 0.005, 0.01, 0.05]
 
 # threshold.policy -> 그 정책이 선언한 명목 목표 오탐률의 키.
 # far_target 열에 무엇을 적을지 정하는 데만 쓴다.
@@ -91,6 +99,33 @@ def rescale(part, scaler):
     )
 
 
+def disk_rank(model, part, rule: str):
+    """행 점수를 디스크 하나당 점수 하나로 접는다. (rank, has_window) 를 준다."""
+    if rule not in ("in_horizon", "or"):
+        raise ValueError(f"지원하지 않는 rule: {rule!r} (in_horizon | or)")
+
+    frame = pd.DataFrame(
+        {"serial": part.serial, "y": part.y, "score": model.predict_proba(part)}
+    )
+    grouped = frame.groupby("serial")
+    disk_score = grouped["score"].max()
+    # 정답 구간(고장 H일 전) 을 가진 디스크. 라벨이 곧 구간의 정의다.
+    has_window = grouped["y"].max().astype(bool)
+
+    if rule == "or":
+        return disk_score, has_window
+    inside = frame[frame["y"] == 1].groupby("serial")["score"].max()
+    # has_window 인 디스크에는 y=1 행이 반드시 있으므로 결측이 나지 않는다.
+    rank = disk_score.where(~has_window, inside.reindex(disk_score.index))
+    return rank, has_window
+
+
+def healthy_quantiles(rank, has_window) -> dict[float, float]:
+    """미고장 디스크 점수의 상위 f% 지점을 FAR 목표마다 잡는다."""
+    healthy = rank[~has_window].to_numpy()
+    return {t: float(np.quantile(healthy, 1.0 - t)) for t in FAR_TARGETS}
+
+
 def score_month(model, part, rule, thresholds=None):
     """한 달을 채점한다. 모든 지표가 디스크 단위다.
 
@@ -104,23 +139,7 @@ def score_month(model, part, rule, thresholds=None):
 
     thresholds: {라벨: 임곗값}. None 이면 그 달 정상 디스크 상위 f% 로 잡는다.
     """
-    if rule not in ("in_horizon", "or"):
-        raise ValueError(f"지원하지 않는 rule: {rule!r} (in_horizon | or)")
-
-    frame = pd.DataFrame(
-        {"serial": part.serial, "y": part.y, "score": model.predict_proba(part)}
-    )
-    grouped = frame.groupby("serial")
-    disk_score = grouped["score"].max()
-    # 정답 구간(고장 H일 전) 을 가진 디스크. 라벨이 곧 구간의 정의다.
-    has_window = grouped["y"].max().astype(bool)
-
-    if rule == "or":
-        rank = disk_score
-    else:
-        inside = frame[frame["y"] == 1].groupby("serial")["score"].max()
-        # has_window 인 디스크에는 y=1 행이 반드시 있으므로 결측이 나지 않는다.
-        rank = disk_score.where(~has_window, inside.reindex(disk_score.index))
+    rank, has_window = disk_rank(model, part, rule)
 
     actual = has_window.astype(int).to_numpy()
     out = {
@@ -130,11 +149,7 @@ def score_month(model, part, rule, thresholds=None):
         "pr_auc": float(average_precision_score(actual, rank.to_numpy())),
     }
     if thresholds is None:
-        healthy_scores = rank[~has_window].to_numpy()
-        thresholds = {
-            target: float(np.quantile(healthy_scores, 1.0 - target))
-            for target in FAR_TARGETS
-        }
+        thresholds = healthy_quantiles(rank, has_window)
 
     out["cells"] = {}
     for label, threshold in thresholds.items():
@@ -157,16 +172,16 @@ def main() -> int:
     parser.add_argument(
         "--threshold-source",
         default="month_quantile",
-        choices=["month_quantile", "validation"],
-        help="month_quantile: 달마다 정상 디스크 상위 f%% | "
-        "validation: run 의 threshold.json (val 에서 고른 값) 을 세 달에 그대로",
+        choices=["month_quantile", "val_quantile", "validation"],
+        help="month_quantile: 달마다 test 정상 디스크 상위 f%% (test 참조) | "
+        "val_quantile: val 월 정상 디스크 상위 f%% 를 세 달에 그대로 (test 미참조) | "
+        "validation: run 의 threshold.json 한 점을 세 달에 그대로",
     )
     args = parser.parse_args()
 
     cfg = cfg_mod.load_yaml(paths.CONFIG_DIR / "experiments" / f"{args.experiment}.yaml")
     pipeline = Pipeline.from_experiment(cfg)
     rule = args.rule or pipeline.evaluation["disk_level"].get("rule", "in_horizon")
-    from_validation = args.threshold_source == "validation"
     # far_target 열에 적을 명목 목표. validation 소스에서만 쓴다.
     policy_cfg = pipeline.evaluation["threshold"]
     target_key = POLICY_TARGET_KEY.get(policy_cfg.get("policy", "max_f1"))
@@ -203,12 +218,23 @@ def main() -> int:
                     if record.get("scaler") else None
                 )
                 thresholds = None
-                if from_validation:
+                if args.threshold_source == "validation":
                     chosen = threshold_mod.load(run_dir)
                     thresholds = {nominal_target: float(chosen["threshold"])}
+                elif args.threshold_source == "val_quantile":
+                    vstart, vend = trained.window("val")
+                    vkey = (drive_name, family, "val", vstart)
+                    if vkey not in cache:
+                        cache[vkey] = load_part(
+                            prepared, pipeline, family, vstart, vend, horizon, threads
+                        )
+                    vpart = cache[vkey]
+                    if family == "sequence":
+                        vpart = rescale(vpart, scaler)
+                    thresholds = healthy_quantiles(*disk_rank(model, vpart, rule))
                 for fold in folds:
                     start, end = fold.window("test")
-                    key = (drive_name, family, start)
+                    key = (drive_name, family, "test", start)
                     if key not in cache:
                         cache[key] = load_part(
                             prepared, pipeline, family, start, end, horizon, threads

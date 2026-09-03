@@ -31,6 +31,7 @@ from ..data import canonicalize
 from ..evaluation import metrics as metrics_mod
 from ..features import build as features_build
 from ..features import fold as fold_mod
+from ..features import resample as resample_mod
 from ..inference import threshold as threshold_mod
 from ..labeling import horizon_labels
 from ..models import registry
@@ -247,6 +248,20 @@ def run_fold(
             part.matrix = scaler.transform(part.matrix, fill_nan=True)
         scaler_state = scaler.state_dict()
 
+    # 인메모리 재표집(SMOTE 계열 등). train 에만, 스케일러 적합 뒤에 건다.
+    # 스케일러보다 뒤여야 합성 표본이 원본과 같은 좌표계에서 만들어진다.
+    resample_cfg = pipeline.features.get("resample") or {}
+    if str(resample_cfg.get("method", "none")).lower() not in ("none", ""):
+        if family != "tabular":
+            raise ValueError(
+                "features.resample 은 tabular 조각에만 걸 수 있다 "
+                f"(현재 family={family!r}). 시퀀스는 (L, F) 텐서라 합성 표본의 "
+                "시간 구조가 정의되지 않는다."
+            )
+        train, resample_stats = resample_mod.apply(train, resample_cfg, seed)
+    else:
+        resample_stats = {"method": "none"}
+
     model = registry.create(model_cfg, seed)
     warm_requested = previous_model is not None
     warm_accepted = model.warm_start(previous_model) if warm_requested else False
@@ -353,6 +368,7 @@ def run_fold(
         "sampling": train.sampling,
         "complexity": model.complexity(),
         "scaler": scaler_state,
+        "resample": resample_stats,
         "timing": {"fit_seconds": round(fit_seconds, 1)},
     }
     with (out_dir / "fold_metrics.json").open("w", encoding="utf-8") as fh:

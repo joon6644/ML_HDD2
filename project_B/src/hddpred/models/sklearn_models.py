@@ -41,6 +41,31 @@ def _resolve(dotted: str):
     return getattr(importlib.import_module(module), attr)
 
 
+def _expand(value, seed: int):
+    """kwargs 안에 중첩된 추정기 명세를 실제 객체로 바꾼다.
+
+    앙상블 메타 추정기(BalancedBagging 등)는 인자로 다른 추정기를 받는다.
+    yaml 로는 객체를 쓸 수 없으므로 다음 형태로 적고 여기서 만든다.
+
+        estimator: {__estimator__: sklearn.ensemble.RandomForestClassifier,
+                    kwargs: {n_estimators: 60}}
+    """
+    if isinstance(value, dict) and "__estimator__" in value:
+        klass = _resolve(value["__estimator__"])
+        kwargs = {k: _expand(v, seed) for k, v in (value.get("kwargs") or {}).items()}
+        try:
+            if "random_state" in klass().get_params():
+                kwargs.setdefault("random_state", seed)
+        except Exception:  # noqa: BLE001
+            pass
+        return klass(**kwargs)
+    if isinstance(value, dict):
+        return {k: _expand(v, seed) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand(v, seed) for v in value]
+    return value
+
+
 class SklearnModel(BaseModel):
     family = "tabular"
     name = "sklearn"
@@ -63,7 +88,10 @@ class SklearnModel(BaseModel):
     # -- 인터페이스 ----------------------------------------------------------
     def fit(self, train, val) -> dict:
         estimator = _resolve(self.params["estimator"])
-        kwargs = dict(self.params.get("kwargs", {}))
+        kwargs = {
+            k: _expand(v, self.seed)
+            for k, v in dict(self.params.get("kwargs", {})).items()
+        }
         # 추정기마다 시드 인자 이름이 다르다. 받는 것만 넘긴다.
         try:
             accepted = estimator().get_params()

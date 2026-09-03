@@ -1,0 +1,11 @@
+name: mlp_easy_ensemble
+family: tabular
+class: hddpred.models.sklearn_models.SklearnModel
+params:
+  estimator: imblearn.ensemble.EasyEnsembleClassifier
+  kwargs:
+    n_estimators: 10
+    sampling_strategy: auto
+    n_jobs: 4
+training:
+  scale_inputs: true
