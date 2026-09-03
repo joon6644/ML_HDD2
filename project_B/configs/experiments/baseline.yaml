@@ -61,6 +61,8 @@ overrides:
   split.val_months: 1
   split.test_months: 1
   split.n_folds: 3
+  # 창을 붙여 쓴다. 라벨 누출은 labeling.censoring_scope: window 가 막는다
+  # (다음 창에서 고장난 디스크의 경계 근처 행은 라벨이 확정되지 않아 빠진다).
   split.embargo_days: 0
   split.allow_label_overlap: true
   split.min_train_failures: 1
@@ -72,7 +74,11 @@ overrides:
   labeling.censoring_scope: window
   labeling.min_history_days: 30
 
-  # --- 파생변수 없음 ---
+  # --- 파생변수 없음 (SMART 원값만) ---
+  # diff/rolling/since_start 를 비우고 나이 2개(age_days, segment_age_days)도
+  # 뺀다. 그 둘은 SMART 원값이 아니라 record_date 에서 계산한 값이라 "원본
+  # 피처만" 이라는 선언에 어긋난다. 남는 입력은 smart_*_raw 18개뿐이다.
+  features.base.include_age: false
   features.base.diff_lags: []
   features.base.rolling_windows: []
   features.base.rolling_stats: []

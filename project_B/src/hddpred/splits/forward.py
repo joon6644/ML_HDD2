@@ -220,25 +220,43 @@ def build(
     """split manifest 를 만들고 그 디렉터리를 돌려준다."""
     lab_hash = provenance.read(labels_path)["config_hash"]
     horizon = int(labeling_cfg["horizon_days"])
-    embargo = split_cfg.get("embargo_days")
-    embargo = horizon if embargo is None else int(embargo)
-    if embargo < horizon:
-        if not split_cfg.get("allow_label_overlap", False):
-            raise ValueError(
-                f"embargo_days({embargo}) < horizon_days({horizon}). "
-                "train 라벨이 평가 구간의 고장을 보게 되어 누출이 발생한다. "
-                "달을 붙여 쓰는 프로토콜이라 의도한 것이면 "
-                "split.allow_label_overlap 을 true 로 두어라."
-            )
-        print(
-            f"  [splits] ⚠ embargo({embargo}d) < horizon({horizon}d). "
-            "구간 경계 앞 " + str(horizon - embargo) + "일의 학습 라벨이 다음 "
-            "구간의 고장을 참조한다 (allow_label_overlap 승인됨)."
-        )
-
     # fold 유효성 검사가 라벨 기준에 따라 달라지므로 hash 에 포함시킨다.
     # 키 이름이 censoring_scope 면 config._HASH_EXCLUDE 에 걸려 빠진다.
     scope = labeling_cfg.get("censoring_scope", "global")
+
+    embargo = split_cfg.get("embargo_days")
+    embargo = horizon if embargo is None else int(embargo)
+    # embargo 는 창 사이를 비워 train 라벨 구간 (t, t+H] 가 다음 창을 덮지
+    # 못하게 한다. censoring_scope: window 는 같은 누출을 다른 방법으로 막는다.
+    #
+    #   y=1  <=>  failure_date <= 창끝  AND  failure_date - t <= H
+    #   y=0  <=>  t + H <= 창끝                (생존을 창 안에서 확인 가능)
+    #   그 외 -> 라벨 없음, 표본에서 제외
+    #
+    # 다음 창에서 고장난 디스크는 첫 조건에 걸리지 않고 둘째 조건도 만족하지
+    # 못해 그냥 빠진다. 라벨이 그 고장을 참조할 경로가 없다.
+    #
+    # embargo 와 다른 점은 무엇을 버리느냐다. embargo 는 경계 앞 H일을 통째로
+    # (양성·음성 모두) 비우는데, window 검열은 창 안에서 고장이 확인된 디스크의
+    # 행은 남긴다. 고장 사건이 수십 건뿐인 이 문제에서 그 차이가 크다.
+    #
+    # 그래서 scope 가 window 면 embargo < horizon 이어도 경고하지 않는다.
+    if embargo < horizon and scope == "global":
+        if not split_cfg.get("allow_label_overlap", False):
+            raise ValueError(
+                f"embargo_days({embargo}) < horizon_days({horizon}) 인데 "
+                "labeling.censoring_scope 가 global 이다. train 라벨이 평가 "
+                "구간의 고장을 보게 되어 누출이 발생한다. censoring_scope 를 "
+                "window 로 두거나, 의도한 것이면 split.allow_label_overlap 을 "
+                "true 로 두어라."
+            )
+        print(
+            f"  [splits] ⚠ embargo({embargo}d) < horizon({horizon}d) 이고 "
+            "censoring_scope 가 global 이다. 구간 경계 앞 "
+            + str(horizon - embargo)
+            + "일의 학습 라벨이 다음 구간의 고장을 참조한다 "
+            "(allow_label_overlap 승인됨)."
+        )
     resolved_split = dict(
         split_cfg, embargo_days=embargo, label_censoring_scope=scope
     )
