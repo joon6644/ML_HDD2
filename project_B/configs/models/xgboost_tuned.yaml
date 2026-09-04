@@ -1,0 +1,26 @@
+# Optuna 로 고른 XGBoost 하이퍼파라미터.
+#   탐색: val 디스크 Recall@FAR 1% 를 5시드(42, 43, 44, 45, 46) 평균으로 최대화
+#   선택: 평균 상위 5개 중 평균 이 가장 큰 조합
+#   test 는 탐색에 쓰지 않았다. 확정 후 5시드로 따로 채점한다.
+#   scripts/run_optuna.py 가 생성한다. 직접 고치지 마라.
+
+name: xgboost_tuned
+family: tabular
+class: hddpred.models.trees.XGBoostModel
+params:
+  max_depth: 4
+  learning_rate: 0.026307398380130718
+  min_child_weight: 3.763495846474651
+  subsample: 0.7167235888671817
+  colsample_bytree: 0.9460920288352525
+  reg_lambda: 0.010398926474417165
+  reg_alpha: 0.5990504393955479
+  gamma: 0.0012992690371871113
+  n_estimators: 2000
+  objective: binary:logistic
+  eval_metric: aucpr
+  tree_method: hist
+  n_jobs: 8
+training:
+  early_stopping_rounds: 100
+  auto_scale_pos_weight: false

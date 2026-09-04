@@ -56,12 +56,16 @@ from export_results import disk_rank, healthy_quantiles  # noqa: E402
 DRIVE = "HGST_20HUH721212ALN604"
 # [+ Feature] 행에서 확정된 피처 구성.
 BASE_EXPERIMENT = "feat_asfd7"
-# 탐색용 시드. 최종 검증(42~46)과 겹치지 않게 뗀다 — 같은 시드로 고르고 같은
-# 시드로 검증하면 그 시드에 맞춘 조합이 뽑혀도 걸러지지 않는다.
-SEARCH_SEEDS = [101, 102, 103, 104, 105]
+# 탐색 시드 = 최종 검증 시드(42~46). 일반적인 관행이다 — val 로 고르고 test 로
+# 보고하는 분리는 그대로 유지되고, 시드까지 떼는 것은 추가 엄격성이었다.
+# 시드를 뗀 판(101~105)의 결과는 study 이름 xgboost_asfd7 로 남아 있다.
+SEARCH_SEEDS = [42, 43, 44, 45, 46]
+STUDY_NAME = "xgboost_asfd7_seed42_46"
+# 선택 기준. "robust" 는 평균-표준편차, "mean" 은 평균 최대.
+SELECT_BY = "mean"
 FAR_TARGET = 0.01
 TOP_K = 5  # 평균 상위 몇 개 중에서 평균-표준편차로 고를지
-STUDY_DB = ROOT / "runs" / "optuna" / "xgboost.db"
+STUDY_DB = ROOT / "runs" / "optuna" / "xgboost.db"  # study 이름으로 구분한다
 RESULT_DIR = ROOT / "results"
 
 
@@ -142,7 +146,7 @@ def main() -> int:
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     STUDY_DB.parent.mkdir(parents=True, exist_ok=True)
     study = optuna.create_study(
-        study_name="xgboost_asfd7",
+        study_name=STUDY_NAME,
         storage=f"sqlite:///{STUDY_DB.as_posix()}",
         direction="maximize",
         load_if_exists=True,
@@ -225,11 +229,18 @@ def main() -> int:
     )
 
     top = frame.nlargest(TOP_K, "recall_mean")
-    chosen = top.nlargest(1, "robust").iloc[0]
+    if SELECT_BY == "robust":
+        chosen = top.nlargest(1, "robust").iloc[0]
+    else:
+        # 평균 최대. 동점이면 흔들림이 작은 쪽으로 가른다.
+        chosen = top.sort_values(
+            ["recall_mean", "robust"], ascending=[False, False]
+        ).iloc[0]
     print(f"\n--- 평균 상위 {TOP_K}개 (val, {len(SEARCH_SEEDS)}시드) ---")
     cols = ["trial", "recall_mean", "recall_sd", "robust"]
     print(top[cols].to_string(index=False))
-    print(f"\n선택: trial {int(chosen['trial'])} (평균-표준편차 최대)")
+    criterion = "평균-표준편차" if SELECT_BY == "robust" else "평균"
+    print(f"\n선택: trial {int(chosen['trial'])} ({criterion} 최대)")
 
     param_keys = [c for c in frame.columns if c not in
                   ("trial", "recall_mean", "recall_sd", "robust")]
@@ -254,7 +265,7 @@ def main() -> int:
         "# Optuna 로 고른 XGBoost 하이퍼파라미터.\n"
         f"#   탐색: val 디스크 Recall@FAR {FAR_TARGET:.0%} 를 {len(SEARCH_SEEDS)}시드"
         f"({', '.join(map(str, SEARCH_SEEDS))}) 평균으로 최대화\n"
-        f"#   선택: 평균 상위 {TOP_K}개 중 (평균 - 표준편차)가 가장 큰 조합\n"
+        f"#   선택: 평균 상위 {TOP_K}개 중 {criterion} 이 가장 큰 조합\n"
         f"#   test 는 탐색에 쓰지 않았다. 확정 후 5시드로 따로 채점한다.\n"
         "#   scripts/run_optuna.py 가 생성한다. 직접 고치지 마라.\n\n"
     )

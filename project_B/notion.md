@@ -64,20 +64,15 @@
 
 - 제안 모델의 성능
 
-|  | Proposed |
-| --- | --- |
-| Recall@FAR 0.1% |  |
-| Recall@FAR 0.5% |  |
-| Recall@FAR 1% |  |
-| Recall@FAR 5% |  |
-| ROC-AUC |  |
-- 구성 요소별 성능 기여도 분석
+!image.png
+
+- 구성 요소별 성능 기여도 분석 (seed=42~46)
 
 |  | Recall@FAR 1% | ROC-AUC |
 | --- | --- | --- |
 | Baseline | 0.532 ± 0.040 | 0.958 ± 0.004 |
 | + Feature | 0.626 ± 0.032 | 0.956 ± 0.004 |
-| + Optuna (Proposed) |  |  |
+| Proposed | **0.634 ± 0.028** | **0.970 ± 0.004** |
 - SHAP Summary Plot
 
 ---

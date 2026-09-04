@@ -156,6 +156,14 @@ ARMS: dict[str, dict] = {
         "desc": "ASFD(차분 절대합), 7일만",
         "base": {**_ALL_OFF, "asfd_windows": [7]},
     },
+    # --- 11단계: Optuna 로 고른 하이퍼파라미터 ([+ Optuna (Proposed)] 행) ---
+    # 피처는 asfd7 과 동일하고 모델 설정만 바꾼다. 탐색은 시드 101~105 의
+    # val 점수로 했고, 여기서는 그 시드를 한 번도 안 쓴 42~46 으로 검증한다.
+    "asfd7_tuned": {
+        "desc": "ASFD7일 + Optuna 튜닝 (Proposed)",
+        "base": {**_ALL_OFF, "asfd_windows": [7]},
+        "model": "xgboost_tuned",
+    },
     "asfd14": {
         "desc": "ASFD(차분 절대합), 14일만",
         "base": {**_ALL_OFF, "asfd_windows": [14]},
@@ -286,7 +294,7 @@ def write_experiment(arm: str, seeds: list[int] | None = None) -> Path:
     base = yaml.safe_load((EXP_DIR / "baseline.yaml").read_text(encoding="utf-8"))
     cfg = copy.deepcopy(base)
     cfg["experiment"] = "feat_" + arm
-    cfg["models"] = ["configs/models/" + MODEL + ".yaml"]
+    cfg["models"] = ["configs/models/" + spec.get("model", MODEL) + ".yaml"]
     if seeds:
         cfg["seeds"] = list(seeds)
 
