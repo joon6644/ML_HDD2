@@ -50,6 +50,16 @@ base:
   # segment 시작 이후 누적 증가량. 단조 증가 카운터에 유효하다.
   include_since_start: true
 
+  # CID (Complexity-Invariant Distance 의 복잡도 추정치, Batista et al. 2011):
+  #   창 w 안의 연속 차분 제곱합의 제곱근. sqrt(sum((x_i - x_{i-1})^2)).
+  #   그 구간이 얼마나 "요동쳤는지"를 재는 표준 시계열 지표.
+  cid_windows: []
+
+  # ASFD (Absolute Sum of First Differences): CID 의 L1 버전.
+  #   창 w 안 연속 차분 절대값의 합. sum(|x_i - x_{i-1}|). 창 안에서 값이
+  #   오르내린 총변동량이다.
+  asfd_windows: []
+
 tabular:
   # 트리 모델 입력. base 피처를 그대로 평탄화해서 쓴다.
   use: base

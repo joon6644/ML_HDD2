@@ -44,6 +44,7 @@ models:
   - configs/models/lstm.yaml
   - configs/models/cnn1d.yaml
   - configs/models/tcn.yaml
+  - configs/models/tcn_deep.yaml
 
 seeds: [42]
 folds: [0]
@@ -89,6 +90,8 @@ overrides:
   # 불균형 처리 없음 — 순수 BCE, 손실 가중 없음.
   models.tcn.training.loss: bce
   models.tcn.training.auto_pos_weight: false
+  models.tcn_deep.training.loss: bce
+  models.tcn_deep.training.auto_pos_weight: false
   models.cnn1d.training.loss: bce
   models.cnn1d.training.auto_pos_weight: false
   models.lstm.training.loss: bce

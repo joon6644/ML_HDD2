@@ -1,0 +1,5 @@
+﻿experiment,drive,model,family,rule,threshold_source,far_target,n_seeds,n_failed_pooled,n_healthy_pooled,recall_mean,recall_sd,precision_mean,precision_sd,far_mean,far_sd,roc_auc_mean,roc_auc_sd,pr_auc_mean,pr_auc_sd,tp_mean,tp_sd
+feat_combo_roll30_asfd30,HGST_20HUH721212ALN604,xgboost,tabular,in_horizon,month_quantile,0.001,1,47,29247,0.10638297872340426,0.0,0.13157894736842105,0.0,0.0011283208534208636,0.0,0.9539948708857241,0.0,0.0953635802770079,0.0,5.0,0.0
+feat_combo_roll30_asfd30,HGST_20HUH721212ALN604,xgboost,tabular,in_horizon,month_quantile,0.005,1,47,29247,0.3617021276595745,0.0,0.09826589595375723,0.0,0.005333880397989537,0.0,0.9539948708857241,0.0,0.0953635802770079,0.0,17.0,0.0
+feat_combo_roll30_asfd30,HGST_20HUH721212ALN604,xgboost,tabular,in_horizon,month_quantile,0.01,1,47,29247,0.46808510638297873,0.0,0.06666666666666667,0.0,0.01053099463192806,0.0,0.9539948708857241,0.0,0.0953635802770079,0.0,22.0,0.0
+feat_combo_roll30_asfd30,HGST_20HUH721212ALN604,xgboost,tabular,in_horizon,month_quantile,0.05,1,47,29247,0.8085106382978723,0.0,0.02490170380078637,0.0,0.05087701302697713,0.0,0.9539948708857241,0.0,0.0953635802770079,0.0,38.0,0.0

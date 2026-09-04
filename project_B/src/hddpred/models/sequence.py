@@ -69,6 +69,97 @@ class WindowDataset(Dataset):
         return torch.from_numpy(np.concatenate((window, mask), axis=1)), self.y[index]
 
 
+class GPUWindowBatcher:
+    """창 조립을 GPU 인덱싱 한 번으로 처리하는 배치 공급기.
+
+    WindowDataset + DataLoader 는 표본 하나마다 __getitem__ 을 부른다. 2,500만
+    표본이면 에폭당 2,500만 번의 파이썬 호출이고, 각 호출이 np.repeat 과
+    np.concatenate 두 번을 한다. 실측에서 GPU 사용률이 15% 였고 초/에폭이
+    모델을 바꿔도 320~341초로 거의 변하지 않았다 — 신경망이 아니라 조립이
+    병목이라는 뜻이다.
+
+    행렬(2,700만 x 18 float32 = 1.9GB)은 GPU 에 통째로 올라간다. 그러면 배치
+    하나가 인덱싱 한 번으로 끝난다.
+
+        rows = end[:, None] + arange(-(L-1), 1)      (B, L)
+        rows = maximum(rows, first[:, None])          앞쪽 패딩 = 첫 실제 행 복제
+        x    = matrix[rows]                           (B, L, F)
+
+    WindowDataset 과 결과가 정확히 같아야 한다:
+      - 패딩   WindowDataset 은 real[:1] 을 (L-n) 번 복제한다. real 의 첫 행은
+               end-n+1 이므로 행 번호를 first=end-n+1 로 하한 절단한 것과 같다.
+      - mask   WindowDataset 은 mask[L-n:] = 1 로 둔다. 위치 j 의 행 번호가
+               end-(L-1)+j 이므로 j >= L-n <=> 행 >= first 다. 같은 조건이다.
+    tests/test_sequence_batcher.py 가 두 경로를 직접 비교한다.
+    """
+
+    def __init__(self, fold, batch_size: int, device, *, shuffle: bool, seed: int = 0):
+        self.batch_size = int(batch_size)
+        self.shuffle = bool(shuffle)
+        self.device = device
+        self._epoch = 0
+        self._seed = int(seed)
+
+        matrix = np.ascontiguousarray(fold.matrix, dtype=np.float32)
+        self.matrix = torch.from_numpy(matrix).to(device, non_blocking=True)
+        self.end = torch.as_tensor(fold.end_index, dtype=torch.long, device=device)
+        self.y = torch.as_tensor(
+            np.zeros(len(fold.end_index), np.float32)
+            if fold.y is None else fold.y.astype(np.float32),
+            device=device,
+        )
+        self.lookback = int(fold.lookback)
+        valid = getattr(fold, "valid_len", None)
+        self.padded = valid is not None
+        # 패딩 모드가 아니면 전부 lookback 만큼 채워진 것으로 본다.
+        self.valid = (
+            torch.as_tensor(valid, dtype=torch.long, device=device)
+            if self.padded
+            else torch.full_like(self.end, self.lookback)
+        )
+        self.offsets = torch.arange(
+            -(self.lookback - 1), 1, dtype=torch.long, device=device
+        )
+
+    def __len__(self) -> int:
+        n = int(self.end.shape[0])
+        return (n + self.batch_size - 1) // self.batch_size
+
+    def gather(self, sel: torch.Tensor) -> torch.Tensor:
+        """표본 인덱스 sel 에 대한 (B, L, F[+1]) 텐서."""
+        end = self.end[sel]
+        rows = end.unsqueeze(1) + self.offsets.unsqueeze(0)
+        first = (end - self.valid[sel] + 1).unsqueeze(1)
+        window = self.matrix[torch.maximum(rows, first)]
+        if not self.padded:
+            return window
+        mask = (rows >= first).to(window.dtype).unsqueeze(-1)
+        return torch.cat((window, mask), dim=-1)
+
+    def __iter__(self):
+        n = int(self.end.shape[0])
+        if self.shuffle:
+            # 에폭마다 다른 순서. 시드를 고정해 재현 가능하게 둔다.
+            generator = torch.Generator(device=self.device.type)
+            generator.manual_seed(self._seed + self._epoch)
+            order = torch.randperm(n, device=self.device, generator=generator)
+            self._epoch += 1
+        else:
+            order = torch.arange(n, device=self.device)
+        for start in range(0, n, self.batch_size):
+            sel = order[start : start + self.batch_size]
+            yield self.gather(sel), self.y[sel]
+
+
+def matrix_fits_on_gpu(fold, device, headroom: float = 0.35) -> bool:
+    """행렬을 GPU 에 통째로 올려도 되는가. 활성값이 쓸 자리를 남긴다."""
+    if device.type != "cuda":
+        return False
+    need = int(fold.matrix.size) * 4
+    free, _total = torch.cuda.mem_get_info(device)
+    return need < free * (1.0 - headroom)
+
+
 # --------------------------------------------------------------------------
 # 신경망
 # --------------------------------------------------------------------------
@@ -273,7 +364,26 @@ class TorchSequenceModel(BaseModel):
         return True
 
     # -- 내부 ---------------------------------------------------------------
-    def _loader(self, fold, *, shuffle: bool, batch_size: int | None = None) -> DataLoader:
+    def _loader(self, fold, *, shuffle: bool, batch_size: int | None = None):
+        """배치 공급기.
+
+        행렬이 GPU 에 올라가면 창 조립을 GPU 인덱싱으로 한다 (GPUWindowBatcher).
+        표본마다 파이썬 __getitem__ 을 부르는 경로가 사라져 조립 병목이 없어진다.
+        안 올라가면 기존 DataLoader 로 떨어진다. 두 경로의 배치 내용은 같다.
+        training.gpu_batching 을 false 로 두면 강제로 옛 경로를 쓴다.
+        """
+        size = int(batch_size or self.training.get("batch_size", 512))
+        if self.training.get("gpu_batching", True) and matrix_fits_on_gpu(
+            fold, self.device
+        ):
+            return GPUWindowBatcher(
+                fold, size, self.device, shuffle=shuffle, seed=self.seed
+            )
+        if shuffle and self.device.type == "cuda":
+            print(
+                f"      [batcher] 행렬 {fold.matrix.nbytes / 2**30:.1f}GB 가 GPU 에 "
+                "안 들어가 DataLoader 로 떨어진다 (조립이 병목이 된다)."
+            )
         dataset = WindowDataset(
             fold.matrix,
             fold.end_index,
@@ -283,7 +393,7 @@ class TorchSequenceModel(BaseModel):
         )
         return DataLoader(
             dataset,
-            batch_size=int(batch_size or self.training.get("batch_size", 512)),
+            batch_size=size,
             shuffle=shuffle,
             num_workers=int(self.training.get("num_workers", 0)),
             pin_memory=self.device.type == "cuda",

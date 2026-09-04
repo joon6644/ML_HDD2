@@ -1,6 +1,6 @@
 # 불균형 처리 비교 — arm: rusboost
 #   RUSBoost (부스팅 매 회차 RUS)
-#   기반 모델: mlp (모델 셀렉 결과)
+#   기반 모델: xgboost (모델 셀렉 결과)
 #   baseline.yaml 과 표집/가중 축 하나만 다르다.
 #   scripts/run_imbalance.py 가 생성한다. 직접 고치지 마라.
 
@@ -15,7 +15,7 @@ uses:
 drives:
 - HGST_20HUH721212ALN604
 models:
-- configs/models/imb/mlp_rusboost.yaml
+- configs/models/imb/xgboost_rusboost.yaml
 seeds:
 - 42
 folds:
@@ -35,6 +35,7 @@ overrides:
   labeling.horizon_days: 10
   labeling.censoring_scope: window
   labeling.min_history_days: 30
+  features.base.include_age: false
   features.base.diff_lags: []
   features.base.rolling_windows: []
   features.base.rolling_stats: []

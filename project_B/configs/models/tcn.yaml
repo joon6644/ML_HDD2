@@ -1,9 +1,28 @@
+# Temporal Convolutional Network (Bai, Kolter & Koltun 2018).
+#
+# 레벨 수는 하이퍼파라미터가 아니라 입력 길이에서 나오는 값이다. 원논문의
+# 규칙은 "수용 영역이 입력 시퀀스를 덮도록 레벨 수를 정한다" 이다.
+#
+#   RF = 1 + 2(k-1)(2^n - 1)        블록당 conv 2개, dilation 2^0 .. 2^(n-1)
+#
+#   k=3 일 때   n=1 -> 5    n=2 -> 13    n=3 -> 29    n=4 -> 61
+#
+# features.sequence.lookback_days 가 14 이므로 이를 덮는 최소 레벨은 n=3 이다.
+# n=4 는 규칙이 요구하는 것보다 한 레벨 많고, 그 레벨(dilation 8)은 길이 14
+# 짜리 시퀀스에 16 을 왼쪽 패딩한다. 볼 데이터가 없는 자리에 파라미터만 는다.
+#
+# ⚠ lookback 을 바꾸면 이 값도 같이 바꿔야 한다. 30 이면 n=3(29)이 간신히
+#   모자라 n=4(61)가 맞고, 7 이면 n=2(13)면 된다.
+#
+# 비교군으로 configs/models/tcn_deep.yaml (n=4) 을 남겨 둔다.
+
 name: tcn
 family: sequence
 class: hddpred.models.sequence.TCNModel
 
 params:
-  channels: [64, 64, 64, 64]
+  # n=3 -> dilation 1, 2, 4 -> 수용 영역 29 (lookback 14 를 덮는 최소)
+  channels: [64, 64, 64]
   kernel_size: 3
   dropout: 0.2
   # causal padding 고정. 미래 시점을 보지 않는다.

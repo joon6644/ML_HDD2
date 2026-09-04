@@ -1,8 +1,0 @@
-name: mlp_balanced_bagging
-family: tabular
-class: hddpred.models.balanced_ensemble.BalancedEnsembleModel
-params:
-  base: configs/models/mlp.yaml
-  n_estimators: 10
-  negative_ratio: 1
-training: {}
