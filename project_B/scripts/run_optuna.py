@@ -1,46 +1,49 @@
-"""XGBoost 하이퍼파라미터 탐색 — notion.md 4장 표의 [+ Optuna (Proposed)] 행.
+"""XGBoost 하이퍼파라미터 탐색 — notion.md 4장 표의 [Proposed] 행.
 
-    python scripts/run_optuna.py --trials 40
-    python scripts/run_optuna.py --trials 40 --resume     # 중단된 study 이어서
-    python scripts/run_optuna.py --report                 # 결과만 다시 출력
+    python scripts/run_optuna.py --trials 200
+    python scripts/run_optuna.py --trials 200 --resume     # 중단된 study 이어서
+    python scripts/run_optuna.py --report                 # 탐색 없이 결과만 출력
 
 피처 구성은 [+ Feature] 행에서 확정된 것(ASFD 7일, 26피처)을 그대로 쓰고,
 분할·판정·운영점(val 에서 잡는 디스크 FAR 1%)도 전부 고정한다. 바뀌는 것은
 XGBoost 하이퍼파라미터뿐이다.
 
-━━ 왜 다중 시드로 탐색하는가 ━━
+━━ 단일 시드로 탐색한다 ━━
 
-단일 시드의 val 점수를 최대화하면 "그 시드에서만 높은" 조합이 뽑힌다. 실측으로
-확인된 문제다 — 같은 설정이 시드에 따라 고장 26~32대로 흔들렸고, 시드 42 하나만
-보고 최적이라 판단했던 조합이 5시드 평균에서는 오히려 중위권이었다.
+논문에 싣는 모든 수치를 시드 42 하나로 통일했다. 반복 학습의 평균과 표준편차를
+싣는 방식은 이 분야 선행연구에서 흔치 않고, 알려주는 바에 비해 표를 무겁게
+만든다. 그래서 탐색도 시드 42 의 val 점수를 최대화하는 방식으로 맞춘다.
 
-그래서 두 겹으로 막는다.
+val 로 고르고 test 로 보고하는 분리는 그대로다. test 는 조합이 확정된 뒤
+한 번만 본다.
 
-  1) 목적함수 = SEARCH_SEEDS 개 시드의 val 점수 평균
-     한 시드의 운으로는 목적함수를 못 올린다.
+━━ 목적함수: FAR 1% 이하 구간의 부분 AUC ━━
 
-  2) 최종 선택 = 평균 - 표준편차 (상위 TOP_K 중에서)
-     평균이 같으면 시드 간 흔들림이 작은 쪽을 고른다. 평균만 보고 고르면
-     "평균은 높지만 분산이 큰" 조합, 즉 운에 기대는 조합이 뽑힐 수 있다.
+한 점의 Recall@FAR 1% 를 최대화하면 동점이 쏟아진다. val 고장 디스크가 23대라
+Recall 의 눈금이 1/23(=0.0435)뿐이기 때문이다. 눈금이 굵으면 상위 시도 수십
+개가 같은 값을 받고, 그중 무엇을 고를지는 결국 임의의 규칙이 정하게 된다.
 
-  그리고 확정된 조합은 탐색에 쓰지 않은 시드까지 포함해 5시드로 test 를
-  다시 채점한다 (scripts/run_features.py 와 같은 경로).
+그래서 점 하나가 아니라 구간을 본다. FAR 0 부터 1% 까지의 부분 ROC 면적
+(partial AUC)을 목적함수로 쓴다.
 
-━━ test 는 탐색에 일절 쓰지 않는다 ━━
+  - 연속값이라 동점이 사실상 없다. 디스크 점수의 순서가 한 쌍만 바뀌어도
+    값이 움직인다.
+  - 보고하는 운영점(FAR 1%)과 같은 영역을 본다. 서론에서 밝힌 "낮은 오탐률
+    에서의 고장 탐지 성능" 이라는 목표와도 일치한다.
+  - 한 임곗값에 과적합되지 않는다. 하필 1% 지점만 좋은 조합이 아니라 저오탐
+    구간 전체에서 좋은 조합이 뽑힌다.
 
-목적함수는 val 구간에서만 계산한다. 조기 종료도 val, 임곗값도 val 이다.
-test 는 탐색이 전부 끝나고 조합이 확정된 뒤 한 번만 본다.
+Recall@FAR 1% 도 시도마다 같이 기록해 두므로 나중에 대조할 수 있다. 전부
+val 에서만 계산한다.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,15 +59,12 @@ from export_results import disk_rank, healthy_quantiles  # noqa: E402
 DRIVE = "HGST_20HUH721212ALN604"
 # [+ Feature] 행에서 확정된 피처 구성.
 BASE_EXPERIMENT = "feat_asfd7"
-# 탐색 시드 = 최종 검증 시드(42~46). 일반적인 관행이다 — val 로 고르고 test 로
-# 보고하는 분리는 그대로 유지되고, 시드까지 떼는 것은 추가 엄격성이었다.
-# 시드를 뗀 판(101~105)의 결과는 study 이름 xgboost_asfd7 로 남아 있다.
-SEARCH_SEEDS = [42, 43, 44, 45, 46]
-STUDY_NAME = "xgboost_asfd7_seed42_46"
-# 선택 기준. "robust" 는 평균-표준편차, "mean" 은 평균 최대.
-SELECT_BY = "mean"
+# 논문의 모든 수치가 시드 42 다. 탐색도 같은 시드로 맞춘다.
+SEED = 42
+STUDY_NAME = "xgboost_asfd7_single42_pauc"
 FAR_TARGET = 0.01
-TOP_K = 5  # 평균 상위 몇 개 중에서 평균-표준편차로 고를지
+# 부분 AUC 를 읽을 FAR 상한. 보고 운영점과 같은 1% 로 둔다.
+PAUC_MAX_FPR = 0.01
 STUDY_DB = ROOT / "runs" / "optuna" / "xgboost.db"  # study 이름으로 구분한다
 RESULT_DIR = ROOT / "results"
 
@@ -121,7 +121,7 @@ def val_score(model, val_part) -> dict:
     fn = int((has_window & ~alarm).sum())
     fp = int((~has_window & alarm).sum())
     tn = int((~has_window & ~alarm).sum())
-    from sklearn.metrics import average_precision_score, roc_auc_score
+    from sklearn.metrics import roc_auc_score
 
     actual = has_window.astype(int).to_numpy()
     return {
@@ -130,13 +130,15 @@ def val_score(model, val_part) -> dict:
         "tp": tp,
         "n_failed": tp + fn,
         "roc_auc": float(roc_auc_score(actual, rank.to_numpy())),
-        "ap": float(average_precision_score(actual, rank.to_numpy())),
+        # 목적함수. sklearn 은 McClish 보정본을 주는데, 원 면적의 단조변환이라
+        # 순위를 매기는 용도로는 같다.
+        "pauc": float(roc_auc_score(actual, rank.to_numpy(), max_fpr=PAUC_MAX_FPR)),
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="XGBoost 하이퍼파라미터 탐색")
-    ap.add_argument("--trials", type=int, default=40)
+    ap.add_argument("--trials", type=int, default=200)
     ap.add_argument("--resume", action="store_true", help="기존 study 이어서")
     ap.add_argument("--report", action="store_true", help="탐색 없이 결과만 출력")
     args = ap.parse_args()
@@ -173,38 +175,37 @@ def main() -> int:
 
         def objective(trial):
             params = {**SEARCH_FIXED, **suggest(trial)}
-            scores = []
-            for i, seed in enumerate(SEARCH_SEEDS):
-                model = XGBoostModel(params, TRAINING, seed=seed)
-                model.fit(train, val)
-                info = val_score(model, val)
-                scores.append(info["recall"])
-                trial.set_user_attr(f"seed{seed}", info)
-                # 시드 하나가 끝날 때마다 중간값을 보고해 가망 없는 조합을 일찍 끊는다.
-                trial.report(float(np.mean(scores)), i)
-                if trial.should_prune():
-                    raise optuna.TrialPruned()
-            trial.set_user_attr("recall_mean", float(np.mean(scores)))
-            trial.set_user_attr("recall_sd", float(np.std(scores, ddof=1)))
-            return float(np.mean(scores))
+            model = XGBoostModel(params, TRAINING, seed=SEED)
+            model.fit(train, val)
+            info = val_score(model, val)
+            for key, value in info.items():
+                trial.set_user_attr(key, value)
+            # FAR 1% 이하 구간의 부분 AUC. 상세는 모듈 docstring 참고.
+            return info["pauc"]
 
+        # 시드가 하나라 중간 보고 지점이 없다. 가지치기는 쓰지 않고, 대신 시도
+        # 하나가 5배 싸진 만큼 시도 수를 늘린다.
         study.sampler = optuna.samplers.TPESampler(seed=0)
-        study.pruner = optuna.pruners.MedianPruner(n_startup_trials=8, n_warmup_steps=1)
         done = len([t for t in study.trials if t.state.is_finished()])
         remaining = max(0, args.trials - done)
-        print(f"[optuna] 완료 {done}개, 남은 시도 {remaining}개", flush=True)
+        print(f"[optuna] 완료 {done}개, 남은 시도 {remaining}개 (seed {SEED} 단일)",
+              flush=True)
         for n in range(remaining):
             t0 = time.time()
             study.optimize(objective, n_trials=1, catch=(Exception,))
             last = study.trials[-1]
-            mark = "pruned" if str(last.state) == "TrialState.PRUNED" else f"{last.value:.4f}"
+            if last.value is None:
+                mark = "failed"
+            else:
+                mark = (f"pauc={last.user_attrs['pauc']:.4f} "
+                        f"recall={last.user_attrs['recall']:.4f}")
             print(
                 f"  [{done + n + 1:>3}/{args.trials}] {mark}  ({time.time() - t0:.0f}s)"
                 f"  best={study.best_value:.4f}",
                 flush=True,
             )
 
-    # ---- 결과 정리: 평균 상위 TOP_K 중에서 평균-표준편차로 고른다 ----
+    # ---- 결과 정리: val 부분 AUC 가 가장 큰 조합 ----
     rows = []
     for t in study.trials:
         if t.value is None:
@@ -212,8 +213,12 @@ def main() -> int:
         rows.append(
             {
                 "trial": t.number,
-                "recall_mean": t.user_attrs.get("recall_mean", t.value),
-                "recall_sd": t.user_attrs.get("recall_sd", np.nan),
+                "pauc": t.user_attrs.get("pauc"),
+                "recall": t.user_attrs.get("recall"),
+                "far": t.user_attrs.get("far"),
+                "roc_auc": t.user_attrs.get("roc_auc"),
+                "tp": t.user_attrs.get("tp"),
+                "n_failed": t.user_attrs.get("n_failed"),
                 **t.params,
             }
         )
@@ -221,35 +226,26 @@ def main() -> int:
         print("완료된 시도가 없다.")
         return 1
 
-    frame = pd.DataFrame(rows)
-    frame["robust"] = frame["recall_mean"] - frame["recall_sd"].fillna(0)
+    frame = pd.DataFrame(rows).sort_values("pauc", ascending=False)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    frame.sort_values("recall_mean", ascending=False).to_csv(
-        RESULT_DIR / "optuna_trials.csv", index=False, encoding="utf-8-sig"
-    )
+    frame.to_csv(RESULT_DIR / "optuna_trials.csv", index=False, encoding="utf-8-sig")
 
-    top = frame.nlargest(TOP_K, "recall_mean")
-    if SELECT_BY == "robust":
-        chosen = top.nlargest(1, "robust").iloc[0]
-    else:
-        # 평균 최대. 동점이면 흔들림이 작은 쪽으로 가른다.
-        chosen = top.sort_values(
-            ["recall_mean", "robust"], ascending=[False, False]
-        ).iloc[0]
-    print(f"\n--- 평균 상위 {TOP_K}개 (val, {len(SEARCH_SEEDS)}시드) ---")
-    cols = ["trial", "recall_mean", "recall_sd", "robust"]
-    print(top[cols].to_string(index=False))
-    criterion = "평균-표준편차" if SELECT_BY == "robust" else "평균"
-    print(f"\n선택: trial {int(chosen['trial'])} ({criterion} 최대)")
+    chosen = frame.iloc[0]
+    n_tied = int((frame["pauc"] == chosen["pauc"]).sum())
+    print(f"\n--- val 상위 8개 (seed {SEED}, 고장 {int(chosen['n_failed'])}대) ---")
+    print(frame[["trial", "pauc", "recall", "far", "roc_auc", "tp"]].head(8)
+          .to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+    print(f"\n선택: trial {int(chosen['trial'])} "
+          f"(val 부분 AUC {chosen['pauc']:.4f} 최대, 동점 {n_tied}개)")
 
     param_keys = [c for c in frame.columns if c not in
-                  ("trial", "recall_mean", "recall_sd", "robust")]
+                  ("trial", "pauc", "recall", "far", "roc_auc", "tp", "n_failed")]
     params = {}
-    for k in param_keys:
-        v = chosen[k]
-        params[k] = int(v) if k == "max_depth" else float(v)
-    for k, v in params.items():
-        print(f"  {k}: {v}")
+    for key in param_keys:
+        value = chosen[key]
+        params[key] = int(value) if key == "max_depth" else float(value)
+    for key, value in params.items():
+        print(f"  {key}: {value}")
 
     out = ROOT / "configs" / "models" / "xgboost_tuned.yaml"
     import yaml
@@ -263,10 +259,9 @@ def main() -> int:
     }
     header = (
         "# Optuna 로 고른 XGBoost 하이퍼파라미터.\n"
-        f"#   탐색: val 디스크 Recall@FAR {FAR_TARGET:.0%} 를 {len(SEARCH_SEEDS)}시드"
-        f"({', '.join(map(str, SEARCH_SEEDS))}) 평균으로 최대화\n"
-        f"#   선택: 평균 상위 {TOP_K}개 중 {criterion} 이 가장 큰 조합\n"
-        f"#   test 는 탐색에 쓰지 않았다. 확정 후 5시드로 따로 채점한다.\n"
+        f"#   탐색: 시드 {SEED} 의 val 디스크 부분 AUC(FAR <= {PAUC_MAX_FPR:.0%}) 최대화\n"
+        f"#   같은 값을 받은 시도: {n_tied}개\n"
+        "#   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.\n"
         "#   scripts/run_optuna.py 가 생성한다. 직접 고치지 마라.\n\n"
     )
     out.write_text(
