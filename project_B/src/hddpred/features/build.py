@@ -280,9 +280,12 @@ def build(
         f"({time.time() - started:.1f}s)"
     )
 
-    sequence_columns = list(smart)
-    if features_cfg["base"].get("include_age", True):
-        sequence_columns = sequence_columns + AGE_COLUMNS
+    # feature_columns 와 같은 열을 쓴다 — 파생(diff/rolling/asfd/cid)이 설정돼
+    # 있으면 시퀀스도 그대로 받는다. 파생 없는 실험(baseline_seq14 등)에서는
+    # feature_columns == raw(+age) 라 이전 동작과 동일하다. 몇 개를 실제로
+    # 쓰느냐는 features.base.* 가 정하고, features.sequence.columns 는 더는
+    # 읽지 않는다.
+    sequence_columns = list(feature_columns)
 
     provenance.write(
         out_dir,

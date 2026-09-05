@@ -163,6 +163,12 @@ class Scaler:
             self.center_ = np.nanmedian(X, axis=0).astype(np.float32)
             spread = np.nanquantile(X, 0.75, axis=0) - np.nanquantile(X, 0.25, axis=0)
             self.scale_ = spread.astype(np.float32)
+        elif self.method == "minmax":
+            # transform 의 (X - center) / scale 이 그대로 [0, 1] 매핑이 된다.
+            # 절단 뒤의 최소·최대를 쓰므로 train 구간의 극단값 하나가 나머지를
+            # 0 근처로 뭉개는 일이 없다.
+            self.center_ = np.nanmin(X, axis=0).astype(np.float32)
+            self.scale_ = (np.nanmax(X, axis=0) - self.center_).astype(np.float32)
         else:
             self.center_ = np.nanmean(X, axis=0).astype(np.float32)
             self.scale_ = np.nanstd(X, axis=0).astype(np.float32)

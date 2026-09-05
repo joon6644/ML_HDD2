@@ -61,7 +61,7 @@ DRIVE = "HGST_20HUH721212ALN604"
 BASE_EXPERIMENT = "feat_asfd7"
 # 논문의 모든 수치가 시드 42 다. 탐색도 같은 시드로 맞춘다.
 SEED = 42
-STUDY_NAME = "xgboost_asfd7_single42_pauc"
+STUDY_NAME = "xgboost_asfd7_single42_pauc_cpu"
 FAR_TARGET = 0.01
 # 부분 AUC 를 읽을 FAR 상한. 보고 운영점과 같은 1% 로 둔다.
 PAUC_MAX_FPR = 0.01
@@ -89,26 +89,29 @@ def suggest(trial):
     }
 
 
-# 탐색은 GPU 로 돈다. 실측 26.9s vs CPU 152.1s (5.7배).
-# GPU 와 CPU 의 결과 차이는 CPU 의 스레드 수만 바꿨을 때의 차이보다 크지 않다
-# (best_score: CPU8 0.156 / GPU 0.174 / CPU12 0.187 — GPU 가 두 CPU 사이).
+# 탐색과 최종 학습이 같은 값을 쓴다. configs/models/xgboost.yaml (Baseline /
+# + Feature 행) 과도 같으므로 표의 세 행이 전부 한 경로에서 나온다.
+#
+# 예전에는 탐색만 GPU(device: cuda, n_jobs 12)로 돌려 5.7배 빠르게 훑고 최종
+# 학습은 CPU 로 했다. 그러면 안 된다 — tree_method: hist 는 계산 경로마다
+# 히스토그램 분할점이 달라져 같은 하이퍼파라미터가 다른 모델이 된다. 실측:
+#
+#   같은 조합, 같은 시드   GPU 0.7586 / CPU n_jobs=12 0.7390 / CPU n_jobs=8 0.7332
+#   탐색 상위 8개의 폭     0.0100
+#
+# 경로 차이가 탐색이 가르려던 차이보다 크다. 게다가 GPU 는 가용 메모리에 따라
+# 스케치 배치가 달라져서, 다른 작업이 GPU 를 함께 쓰면 같은 조합의 점수까지
+# 바뀐다 (기록 0.7929 -> 재현 0.7586). CPU 는 n_jobs 를 고정하면 리덕션 순서가
+# 고정되어 프로세스가 달라도 재현된다.
 SEARCH_FIXED = {
-    "n_estimators": 2000,
-    "objective": "binary:logistic",
-    "eval_metric": "aucpr",
-    "tree_method": "hist",
-    "device": "cuda",
-    "n_jobs": 12,
-}
-# 확정된 조합을 저장할 때 쓰는 값. baseline / +Feature 행이 CPU 로 계산됐으므로
-# 최종 검증도 같은 경로로 맞춘다. 하이퍼파라미터 자체는 경로와 무관하다.
-OUTPUT_FIXED = {
     "n_estimators": 2000,
     "objective": "binary:logistic",
     "eval_metric": "aucpr",
     "tree_method": "hist",
     "n_jobs": 8,
 }
+# 확정된 조합을 저장할 때 쓰는 값. 위와 같아야 한다.
+OUTPUT_FIXED = dict(SEARCH_FIXED)
 TRAINING = {"early_stopping_rounds": 100, "auto_scale_pos_weight": False}
 
 
@@ -183,8 +186,7 @@ def main() -> int:
             # FAR 1% 이하 구간의 부분 AUC. 상세는 모듈 docstring 참고.
             return info["pauc"]
 
-        # 시드가 하나라 중간 보고 지점이 없다. 가지치기는 쓰지 않고, 대신 시도
-        # 하나가 5배 싸진 만큼 시도 수를 늘린다.
+        # 시드가 하나라 중간 보고 지점이 없다. 가지치기는 쓰지 않는다.
         study.sampler = optuna.samplers.TPESampler(seed=0)
         done = len([t for t in study.trials if t.state.is_finished()])
         remaining = max(0, args.trials - done)

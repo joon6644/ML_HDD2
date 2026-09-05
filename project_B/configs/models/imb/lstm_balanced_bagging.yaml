@@ -1,0 +1,13 @@
+# 균형 배깅 (시퀀스) — 부분표본 10개, 음성:양성 = 1:1
+#
+# 부분표집은 end_index 에만 걸린다. matrix 는 lookback 창을 채우는
+# 재료라 손대지 않는다 — 행을 빼면 남은 표본의 창에 구멍이 뚫린다.
+
+name: lstm_balanced_bagging
+family: sequence
+class: hddpred.models.balanced_sequence.BalancedSequenceEnsembleModel
+params:
+  base: configs/models/lstm.yaml
+  n_estimators: 10
+  negative_ratio: 1
+training: {}

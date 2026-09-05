@@ -169,6 +169,83 @@ def build(
         f"({time.time() - started:.1f}s)"
     )
 
+    # --- 2b. 상수 / 중복 컬럼 제거 ---------------------------------------
+    # 결측률 필터를 통과해도 값이 하나뿐이거나 다른 컬럼과 사실상 같은 컬럼이
+    # 남는다. 실측: 도시바는 26개 중 10개가 상수였고, smart_222(가동시간)는
+    # smart_9(전원인가시간)와 상관 0.9997 이었다. 트리 모델은 이런 컬럼에서
+    # 분할하지 않으므로 성능에는 영향이 없지만, 히스토그램을 짓는 시간과
+    # 메모리는 그대로 쓴다. 여기서 걷어낸다.
+    if preprocessing_cfg.get("drop_constant_columns", False) and valid_columns:
+        print("[2b/7] 상수 SMART 컬럼 제거")
+        started = time.time()
+        distinct_sql = ", ".join(
+            f"COUNT(DISTINCT {_quoted(c)})" for c in valid_columns
+        )
+        counts = con.execute(f"SELECT {distinct_sql} FROM typed_raw").fetchone()
+        constants = [c for c, n in zip(valid_columns, counts) if (n or 0) <= 1]
+        valid_columns = [c for c in valid_columns if c not in constants]
+        if not valid_columns:
+            raise ValueError(f"{name}: 상수 제거 후 남은 SMART 컬럼이 없습니다.")
+        print(
+            f"      {len(constants)}개 제거, {len(valid_columns)}개 보존"
+            f" ({time.time() - started:.1f}s)"
+        )
+        if constants:
+            print("      " + ", ".join(constants))
+
+    if preprocessing_cfg.get("drop_duplicate_columns", False) and len(valid_columns) > 1:
+        print("[2c/7] 중복 SMART 컬럼 제거 (전 행 완전 일치)")
+        started = time.time()
+        # 판정 기준은 project_A/preprocessing/ST12000NM0007.py 와 같다 — 모든
+        # 행에서 값이 같을 때만 버린다. 상관이 높다는 이유로는 버리지 않는다.
+        # 다만 후보 쌍을 손으로 적어두는 대신 전 쌍을 훑는다.
+        #
+        # 전수로 모든 쌍을 비교하면 스캔이 커지므로 두 단계로 나눈다.
+        #   1) 결정적 표본에서 불일치가 하나도 없는 쌍만 추린다.
+        #   2) 그 후보만 전 행으로 다시 확인하고, 통과한 것만 버린다.
+        sample_rows = int(preprocessing_cfg.get("duplicate_sample_rows", 2_000_000))
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE dup_sample AS "
+            f"SELECT {', '.join(_quoted(c) for c in valid_columns)} FROM typed_raw "
+            f"USING SAMPLE reservoir({sample_rows} ROWS) REPEATABLE (42)"
+        )
+        pairs = [
+            (a, b)
+            for i, a in enumerate(valid_columns)
+            for b in valid_columns[i + 1:]
+        ]
+
+        def _mismatch_counts(table: str, candidates):
+            expr = ", ".join(
+                f"COUNT(*) FILTER (WHERE {_quoted(a)} IS DISTINCT FROM {_quoted(b)})"
+                for a, b in candidates
+            )
+            return con.execute(f"SELECT {expr} FROM {table}").fetchone()
+
+        candidates = [
+            pair for pair, bad in zip(pairs, _mismatch_counts("dup_sample", pairs))
+            if (bad or 0) == 0
+        ]
+        con.execute("DROP TABLE IF EXISTS dup_sample")
+
+        redundant, reasons = set(), []
+        if candidates:
+            for pair, bad in zip(candidates, _mismatch_counts("typed_raw", candidates)):
+                a, b = pair
+                if (bad or 0) != 0 or a in redundant or b in redundant:
+                    continue
+                # 겹치는 쌍에서는 뒤쪽을 버린다. valid_columns 가 원본 스키마
+                # 순서(SMART 번호 오름차순)라 더 표준적인 속성이 남는다.
+                redundant.add(b)
+                reasons.append(f"{b} (== {a})")
+        valid_columns = [c for c in valid_columns if c not in redundant]
+        print(
+            f"      후보 {len(candidates)}쌍 중 {len(redundant)}개 제거, "
+            f"{len(valid_columns)}개 보존 ({time.time() - started:.1f}s)"
+        )
+        if reasons:
+            print("      " + ", ".join(reasons))
+
     # --- 3. (serial_number, date) 중복 제거 ------------------------------
     print("[3/7] (serial_number, date) 중복 행 병합")
     started = time.time()

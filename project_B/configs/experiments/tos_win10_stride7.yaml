@@ -1,0 +1,63 @@
+# 도시바 10-2-6 : 음성 7일 간격
+#
+# 학습 10개월 - 검증 2개월 - 테스트 6개월(월 단위 1개씩), 재학습 없음.
+# 네 판이 features.train_sampling 하나만 다르고 나머지는 전부 같다.
+#
+# 음성 표집은 학습에만 걸린다. val/test 는 전 함대 전 행으로 채점한다.
+# 양성(고장 10일 전)은 stride 와 무관하게 전부 남는다.
+#
+# 피처는 일별 전 구간에서 먼저 계산되고, 그 뒤에 학습 행을 고른다.
+# 순서가 반대면 ASFD 같은 창 통계가 망가진다.
+
+experiment: tos_win10_stride7
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/xgboost.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: stride
+  models.mlp.training.loss: bce
+  models.mlp.training.auto_pos_weight: false
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  features.base.include_age: false
+  features.base.derived_on: critical
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows:
+  - 7
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: true
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.train_sampling.negative_stride: 7
+output_root: ${project_root}/runs

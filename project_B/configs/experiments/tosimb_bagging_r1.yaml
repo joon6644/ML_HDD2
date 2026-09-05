@@ -1,0 +1,59 @@
+# 불균형 처리 비교 — arm: bagging_r1
+#   균형 배깅 K=10, 음성:양성 1:1
+#   도시바 10-2-6, 기반 모델 LSTM, 원본 피처만, lookback 14 + min-max.
+#
+#   Wallace et al. 2011 의 균형 배깅. 부분표본마다 음성이 달라 K개 모델이
+#   서로 다른 음성 영역을 본다. 단일 언더샘플링이 버리는 정보를 앙상블로
+#   되찾는 것이 요지다. 양성은 매 부분표본에 전량 들어간다.
+
+experiment: tosimb_bagging_r1
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/imb/lstm_balanced_bagging.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: none
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: true
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.base.include_age: false
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows: []
+  features.sequence.lookback_days: 14
+  features.scaling.method: minmax
+  models.lstm.training.loss: bce
+  models.lstm.training.auto_pos_weight: false
+output_root: ${project_root}/runs

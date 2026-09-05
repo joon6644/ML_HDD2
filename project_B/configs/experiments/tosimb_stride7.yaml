@@ -1,0 +1,60 @@
+# 불균형 처리 비교 — arm: stride7
+#   음성 7일 간격
+#   도시바 10-2-6, LSTM(모델 셀렉 결과), 원본 피처만, lookback 14 + min-max.
+#   무처리 arm 이 모델 셀렉에서 이긴 그 구성이다.
+#
+#   증강 생성(SMOTE/ADASYN 등)은 하지 않는다. 시퀀스 입력에서 합성 표본은
+#   시간축의 실제 관측 궤적을 깨뜨린다.
+
+experiment: tosimb_stride7
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/lstm.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: stride
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: true
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.base.include_age: false
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows: []
+  features.sequence.lookback_days: 14
+  features.scaling.method: minmax
+  models.lstm.training.loss: bce
+  models.lstm.training.auto_pos_weight: false
+  features.train_sampling.negative_stride: 7
+output_root: ${project_root}/runs

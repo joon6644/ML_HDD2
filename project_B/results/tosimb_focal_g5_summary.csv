@@ -1,0 +1,5 @@
+﻿experiment,drive,model,family,rule,threshold_source,far_target,n_seeds,n_failed_pooled,n_healthy_pooled,recall_mean,recall_sd,precision_mean,precision_sd,far_mean,far_sd,roc_auc_mean,roc_auc_sd,pr_auc_mean,pr_auc_sd,tp_mean,tp_sd
+tosimb_focal_g5,TOSHIBA_20MG07ACA14TA,lstm,sequence,in_horizon,val_quantile,0.001,1,159,223625,0.2138364779874214,0.0,0.15668202764976957,0.0,0.0008183342649524875,0.0,0.9027332148324153,0.0,0.12811000552336968,0.0,34.0,0.0
+tosimb_focal_g5,TOSHIBA_20MG07ACA14TA,lstm,sequence,in_horizon,val_quantile,0.005,1,159,223625,0.5094339622641509,0.0,0.07714285714285714,0.0,0.004333147009502515,0.0,0.9027332148324153,0.0,0.12811000552336968,0.0,81.0,0.0
+tosimb_focal_g5,TOSHIBA_20MG07ACA14TA,lstm,sequence,in_horizon,val_quantile,0.01,1,159,223625,0.7169811320754716,0.0,0.044740973312401885,0.0,0.010884292901062046,0.0,0.9027332148324153,0.0,0.12811000552336968,0.0,114.0,0.0
+tosimb_focal_g5,TOSHIBA_20MG07ACA14TA,lstm,sequence,in_horizon,val_quantile,0.05,1,159,223625,0.8176100628930818,0.0,0.011951824951733015,0.0,0.0480581330352152,0.0,0.9027332148324153,0.0,0.12811000552336968,0.0,130.0,0.0

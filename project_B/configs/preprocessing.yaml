@@ -12,6 +12,22 @@ feature_source: smart_raw
 # 결측률이 이 값 이상인 SMART 컬럼은 제거한다.
 missing_ratio_threshold: 0.90
 
+# 값이 하나뿐인 SMART 컬럼은 제거한다. 트리 모델은 상수에서 분할하지 않으므로
+# 성능에는 영향이 없지만 히스토그램 시간과 메모리는 그대로 쓴다.
+# 실측: 도시바는 결측 필터를 통과한 26개 중 10개가 상수였다.
+drop_constant_columns: true
+
+# 모든 행에서 값이 같은 SMART 컬럼 쌍은 뒤쪽(SMART 번호가 큰 쪽)을 버린다.
+# 판정 기준은 project_A/preprocessing/ST12000NM0007.py 와 같은 "완전 일치"다.
+# 상관이 높다는 이유로는 버리지 않는다 — 예컨대 도시바 smart_222 는 smart_9 와
+# r=0.9997 이지만 같은 값이 아니므로 남긴다.
+drop_duplicate_columns: true
+
+# 중복 후보를 추릴 때 쓰는 표본 행 수. 전 쌍을 전수 비교하면 스캔이 커지므로
+# 표본에서 불일치가 없는 쌍만 추린 뒤 그 후보만 전 행으로 재확인한다.
+# reservoir 표집이며 seed 를 고정해 재현된다.
+duplicate_sample_rows: 2000000
+
 # 누락일이 이 값 이하이면 날짜 행을 생성하고 forward fill 한다.
 # 초과하면 별도 segment로 분리한다 (segment 경계를 넘는 fill 없음).
 max_fillable_missing_days: 3

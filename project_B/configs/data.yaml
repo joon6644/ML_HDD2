@@ -22,7 +22,10 @@ drives:
     end_date: "2020-05-31"
   - name: TOSHIBA_20MG07ACA14TA
     file: TOSHIBA_20MG07ACA14TA.parquet
-    enabled: false
+    enabled: true
+    # 함대 37,200대가 2026-03-31 까지 안정적으로 관측된다. HGST 와 달리 말단
+    # 종료 아티팩트가 없다 (HGST 는 2026-03-21 에 관측이 끊기는데 그 달 고장률이
+    # 직전 달의 4.2배로 튄다). 고장도 월 18~51 로 추세 없이 고르다.
 
 # 원본에 반드시 있어야 하는 컬럼. 없으면 즉시 중단한다.
 required_columns:
