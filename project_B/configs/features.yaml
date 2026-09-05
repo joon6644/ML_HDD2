@@ -85,7 +85,10 @@ scaling:
 # 학습 표본 수 조절. 평가에는 절대 적용하지 않는다.
 train_sampling:
   # none      전 구간 전 표본 사용 (Scope = Full)
-  # stride    음성 표본만 n일 간격으로 추출, 양성은 전부 유지
+  # stride    음성 표본만 n일 간격으로 추출, 양성은 전부 유지.
+  #           논문에서는 "계통 추출(systematic sampling)" 이라 쓴다. 설정 키가
+  #           stride 인 것은 내부 이름일 뿐이고, CNN1D/TCN 의 커널 이동 폭과
+  #           헷갈리지 않도록 글에서는 그 낱말을 쓰지 않는다.
   # match_val 확장 창 재학습용 구성.
   #
   #             [과거 양성 전량]

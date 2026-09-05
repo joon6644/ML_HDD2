@@ -10,15 +10,19 @@
 #   디스크 점수가 창 안 최댓값이라, val 을 두 달 한 창으로 두면 50일
 #   최댓값으로 잡은 임곗값을 20일 최댓값에 들이대게 된다.
 
-# 불균형 처리 비교 — arm: bagging_r10
-#   균형 배깅 K=10, 음성:양성 10:1
-#   도시바 10-2-6, 기반 모델 LSTM, 원본 피처만, lookback 14 + min-max.
+# 입력 시퀀스 길이 민감도 — lookback 7일
 #
-#   Wallace et al. 2011 의 균형 배깅. 부분표본마다 음성이 달라 K개 모델이
-#   서로 다른 음성 영역을 본다. 단일 언더샘플링이 버리는 정보를 앙상블로
-#   되찾는 것이 요지다. 양성은 매 부분표본에 전량 들어간다.
+# 도시바 10-2-6, LSTM, 원본 피처만, min-max, 불균형 처리 없음.
+# lookback 외 모든 축이 tosimb_none 과 같다.
+#
+# LSTM 은 TCN 과 달리 수용 영역이 층 수에 묶이지 않으므로 lookback 만
+# 바꾸면 된다. TCN 이었다면 채널 수도 같이 조정해야 한다.
+#
+# lookback 을 늘리면 창을 못 채우는 표본이 늘어난다. short_history: pad 라
+# 버리지 않고 그 segment 첫 행으로 복제 + mask 채널로 표시하므로 평가
+# 모집단은 길이와 무관하게 같다.
 
-experiment: tosimb_bagging_r10
+experiment: toslb_7
 uses:
   data: configs/data.yaml
   preprocessing: configs/preprocessing.yaml
@@ -29,7 +33,7 @@ uses:
 drives:
 - TOSHIBA_20MG07ACA14TA
 models:
-- configs/models/imb/lstm_balanced_bagging_r10.yaml
+- configs/models/lstm.yaml
 seeds:
 - 42
 folds:
@@ -64,7 +68,7 @@ overrides:
   features.base.include_since_start: false
   features.base.cid_windows: []
   features.base.asfd_windows: []
-  features.sequence.lookback_days: 14
+  features.sequence.lookback_days: 7
   features.scaling.method: minmax
   models.lstm.training.loss: bce
   models.lstm.training.auto_pos_weight: false

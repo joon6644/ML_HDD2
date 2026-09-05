@@ -33,11 +33,16 @@ fold 0 에서 학습한 모델 하나로 split manifest 의 모든 test 월을 �
 
     <out>_long.csv     (모델, 시드, test월, FAR목표) 한 줄. 원자료.
                        여기서 어떤 집계든 다시 만들 수 있다.
-    <out>_summary.csv  달을 풀링하고 시드로 평균낸 요약. 논문 표에 쓰는 값.
+    <out>_summary.csv  달마다 지표를 내고 달로 평균, 그 다음 시드로 평균낸
+                       요약. 논문 표에 쓰는 값.
 
-풀링은 고장 사건을 하나의 모집단으로 본다.
-    Recall = sum(TP) / sum(고장),  FAR = sum(FP) / sum(정상)
-월별 recall 을 단순 평균하면 고장이 적은 달이 과대 대표된다.
+집계는 월별 평균이다. 달을 하나의 모집단으로 합치지 않는다.
+    달마다  Recall = TP / 고장,  FAR = FP / 정상
+    대표값 = 그 달들의 평균,  recall_month_sd = 달 간 표준편차
+
+평가 단위가 (디스크 x 월) 이고 배치 서사도 "한 번 학습해 매달 예측한다" 이므로
+이쪽이 서술과 맞고, 달 간 표준편차가 그대로 안정성 근거가 된다. 풀링 대비
+표준오차 손해는 실측 1.02배였다 (도시바, 월별 고장 18~35).
 """
 
 from __future__ import annotations
@@ -47,6 +52,7 @@ import csv
 import json
 import statistics as st
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -124,6 +130,49 @@ def healthy_quantiles(rank, has_window) -> dict[float, float]:
     """미고장 디스크 점수의 상위 f% 지점을 FAR 목표마다 잡는다."""
     healthy = rank[~has_window].to_numpy()
     return {t: float(np.quantile(healthy, 1.0 - t)) for t in FAR_TARGETS}
+
+
+def month_windows(start: date, end: date) -> list[tuple[date, date]]:
+    """구간을 달력 월 경계로 쪼갠다. 양 끝은 원래 구간에 맞춰 자른다."""
+    out, cursor = [], start
+    while cursor <= end:
+        if cursor.month == 12:
+            nxt = date(cursor.year + 1, 1, 1)
+        else:
+            nxt = date(cursor.year, cursor.month + 1, 1)
+        out.append((cursor, min(end, nxt - timedelta(days=1))))
+        cursor = nxt
+    return out
+
+
+def val_disk_rank(prepared, pipeline, family, window, horizon, threads,
+                  model, scaler, rule, cache):
+    """검증 구간의 디스크 점수. **월별 창으로 쪼개서** 풀링한다.
+
+    디스크 점수는 창 안의 최댓값이라 창이 길수록 커진다. val 을 두 달 한 창으로
+    두고 test 는 한 달씩 채점하면, 50일 최댓값으로 잡은 임곗값을 20일 최댓값에
+    들이대는 셈이 되어 임곗값이 계통적으로 높아진다.
+
+    실측(도시바 10-2-6, LSTM): 두 달 한 창의 FAR 1% 임곗값이 0.007782,
+    월별로 쪼개 풀링하면 0.003249 로 2.4배 차이가 났다. 중앙값은 거의 같고
+    (0.000062 vs 0.000060) 상위 꼬리에서만 벌어진다.
+
+    test 와 같은 단위(디스크 x 월)로 맞추려면 val 도 월별로 쪼개야 한다.
+    """
+    ranks, flags = [], []
+    for wstart, wend in month_windows(*window):
+        key = (prepared.name, family, "val", wstart)
+        if key not in cache:
+            cache[key] = load_part(
+                prepared, pipeline, family, wstart, wend, horizon, threads
+            )
+        part = cache[key]
+        if family == "sequence":
+            part = rescale(part, scaler)
+        rank, has_window = disk_rank(model, part, rule)
+        ranks.append(rank)
+        flags.append(has_window)
+    return pd.concat(ranks, ignore_index=True), pd.concat(flags, ignore_index=True)
 
 
 def score_month(model, part, rule, thresholds=None):
@@ -222,16 +271,12 @@ def main() -> int:
                     chosen = threshold_mod.load(run_dir)
                     thresholds = {nominal_target: float(chosen["threshold"])}
                 elif args.threshold_source == "val_quantile":
-                    vstart, vend = trained.window("val")
-                    vkey = (drive_name, family, "val", vstart)
-                    if vkey not in cache:
-                        cache[vkey] = load_part(
-                            prepared, pipeline, family, vstart, vend, horizon, threads
+                    thresholds = healthy_quantiles(
+                        *val_disk_rank(
+                            prepared, pipeline, family, trained.window("val"),
+                            horizon, threads, model, scaler, rule, cache,
                         )
-                    vpart = cache[vkey]
-                    if family == "sequence":
-                        vpart = rescale(vpart, scaler)
-                    thresholds = healthy_quantiles(*disk_rank(model, vpart, rule))
+                    )
                 for fold in folds:
                     start, end = fold.window("test")
                     key = (drive_name, family, "test", start)
@@ -275,34 +320,65 @@ def main() -> int:
         writer.writerows(long_rows)
     print(f"\n[원자료] {long_path}  ({len(long_rows)} 행)")
 
-    # --- 요약: 달을 풀링하고 시드로 평균 -----------------------------------
+    # --- 요약: 달마다 지표를 내고 달로 평균 ---------------------------------
+    #
+    # 달을 하나의 모집단으로 합치지(풀링) 않는다. 평가 단위가 (디스크 x 월) 이고
+    # 배치 서사도 "한 번 학습해 매달 예측한다" 이므로, 달마다 지표를 내고 그
+    # 평균을 대표값으로 쓴다. 그러면 달 간 표준편차가 그대로 안정성 근거가 되고,
+    # 디스크-월이라는 합성 단위를 표에 안 꺼내도 된다.
+    #
+    # 통계적 손해는 거의 없다. 균등가중 평균의 분산은 (1/M^2) * sum p(1-p)/n_i
+    # 이고 풀링은 p(1-p)/sum(n_i) 인데, 실측(도시바 월별 고장 18~35)에서 표준
+    # 오차가 0.0354 vs 0.0348 로 1.02배였다. 달별 표본이 크게 어긋나면 이 차이가
+    # 벌어지므로, 그때는 풀링을 다시 검토해야 한다.
+    #
+    # Recall 과 FAR 을 같은 방식으로 평균낸다. 한쪽만 풀링하면 분자와 분모의
+    # 가중이 어긋난다.
+    #
+    # 시드는 하나다. 변동을 보이는 축은 시드가 아니라 달이다 — 같은 모델을
+    # 여러 시드로 돌린 평균은 배치에서 재현되지 않는 수치이고, 달 간 변동은
+    # "재학습 없이 다음 달을 예측한다" 는 이 문제의 실제 불확실성이다.
     frame = pd.DataFrame(long_rows)
+    seeds = sorted(frame["seed"].unique())
+    if len(seeds) != 1:
+        raise SystemExit(
+            f"시드가 {len(seeds)}개다: {seeds}. 이 파이프라인은 단일 시드만 쓴다 — "
+            "experiment yaml 의 seeds 를 하나로 두어라."
+        )
+
     summary = []
     keys = [
         "experiment", "drive", "model", "family",
         "rule", "threshold_source", "far_target",
     ]
     for key, group in frame.groupby(keys, sort=False):
-        per_seed = []
-        for _, seed_group in group.groupby("seed"):
-            tp, fn = int(seed_group["tp"].sum()), int(seed_group["fn"].sum())
-            fp, tn = int(seed_group["fp"].sum()), int(seed_group["tn"].sum())
-            per_seed.append({
-                "recall": tp / (tp + fn) if tp + fn else 0.0,
+        monthly = []
+        for _, m in group.groupby("test_month"):
+            tp, fn = int(m["tp"].sum()), int(m["fn"].sum())
+            fp, tn = int(m["fp"].sum()), int(m["tn"].sum())
+            monthly.append({
+                "recall": tp / (tp + fn) if tp + fn else float("nan"),
                 "precision": tp / (tp + fp) if tp + fp else 0.0,
                 "far": fp / (fp + tn) if fp + tn else 0.0,
-                "roc_auc": float(seed_group["roc_auc"].mean()),
-                "pr_auc": float(seed_group["pr_auc"].mean()),
+                "roc_auc": float(m["roc_auc"].mean()),
+                "pr_auc": float(m["pr_auc"].mean()),
                 "tp": float(tp),
             })
+        # 고장 0 인 달은 recall 이 정의되지 않는다. split 의 min_test_failures
+        # 가 막고 있지만, 뚫렸을 때 조용히 0 으로 세지 않도록 빼고 평균낸다.
+        valid = [m for m in monthly if m["recall"] == m["recall"]]
+
         row = dict(zip(keys, key))
-        row["n_seeds"] = len(per_seed)
-        row["n_failed_pooled"] = int(group["n_failed"].sum() / len(per_seed))
-        row["n_healthy_pooled"] = int(group["n_healthy"].sum() / len(per_seed))
+        row["seed"] = int(seeds[0])
+        row["n_months"] = len(monthly)
+        row["n_failed_total"] = int(group["n_failed"].sum())
+        row["n_healthy_total"] = int(group["n_healthy"].sum())
         for metric in ("recall", "precision", "far", "roc_auc", "pr_auc", "tp"):
-            values = [s[metric] for s in per_seed]
-            row[f"{metric}_mean"] = st.mean(values)
-            row[f"{metric}_sd"] = st.pstdev(values) if len(values) > 1 else 0.0
+            source = valid if metric == "recall" else monthly
+            values = [m[metric] for m in source]
+            row[metric] = st.mean(values) if values else 0.0
+            # 달 간 산포. 재학습 없이 여러 달을 예측할 때의 안정성 근거다.
+            row[f"{metric}_month_sd"] = st.stdev(values) if len(values) > 1 else 0.0
         summary.append(row)
 
     summary_path = prefix.with_name(prefix.name + "_summary.csv")

@@ -1,3 +1,15 @@
+#   exclude_incomplete_tail 을 끈다. 그 규칙은 말단 10일의 라벨을
+#   확정할 수 없다는 이유로 마지막 달을 통째로 빼는데, 창 검열
+#   (censoring_scope: window) 은 어차피 모든 달의 마지막 10일을
+#   버린다. 다른 달은 '다음 달 데이터가 있어도 창 밖이라 안 본다'는
+#   선택이고 3월은 '데이터가 없어 못 본다'는 강제일 뿐, 정보량은 같다.
+#   도시바 2026-03 은 함대 37,202대가 31일까지 정상 관측되고 고장도
+#   36건으로 정상 범위(18~51)다. HGST 처럼 오염돼 있지 않다.
+#
+#   검증 임곗값도 월별 창으로 쪼개 풀링한다 (export_results.val_disk_rank).
+#   디스크 점수가 창 안 최댓값이라, val 을 두 달 한 창으로 두면 50일
+#   최댓값으로 잡은 임곗값을 20일 최댓값에 들이대게 된다.
+
 # 불균형 처리 비교 — arm: focal_g5
 #   focal γ=5, α=0.25
 #   도시바 10-2-6, LSTM(모델 셀렉 결과), 원본 피처만, lookback 14 + min-max.
@@ -38,7 +50,7 @@ overrides:
   split.n_folds: 6
   split.embargo_days: 0
   split.allow_label_overlap: true
-  split.exclude_incomplete_tail: true
+  split.exclude_incomplete_tail: false
   split.min_train_months: 6
   split.min_train_failures: 1
   split.min_val_failures: 1
