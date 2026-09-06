@@ -98,6 +98,15 @@ class MLPModel(BaseModel):
         batch_size = int(self.training.get("batch_size", 4096))
         epochs = int(self.training.get("epochs", 30))
         patience = int(self.training.get("early_stopping_patience", 5))
+        monitor = str(self.training.get("early_stopping_metric", "val_pr_auc"))
+        if monitor == "val_pr_auc":
+            monitor_fn = self._pr_auc
+        elif monitor == "val_pauc":
+            monitor_fn = self._pauc
+        else:
+            raise ValueError(
+                f"알 수 없는 early_stopping_metric: {monitor!r} (val_pr_auc | val_pauc)"
+            )
         generator = torch.Generator().manual_seed(self.seed)
 
         best, best_epoch, best_state, waited = -np.inf, -1, None, 0
@@ -120,7 +129,7 @@ class MLPModel(BaseModel):
                 seen += int(index.shape[0])
 
             score = self._score(val_x, batch_size)
-            val_pr_auc = self._pr_auc(val.y, score)
+            val_pr_auc = monitor_fn(val.y, score)
             history.append(
                 {"epoch": epoch, "train_loss": total / max(seen, 1), "val_pr_auc": val_pr_auc}
             )
@@ -180,6 +189,15 @@ class MLPModel(BaseModel):
         if y_true.max() == y_true.min():
             return float("nan")
         return float(average_precision_score(y_true, score))
+
+    @staticmethod
+    def _pauc(y_true: np.ndarray, score: np.ndarray, max_fpr: float = 0.05) -> float:
+        """FAR <= max_fpr 구간의 부분 AUC. 시퀀스 모델과 같은 감시값."""
+        from sklearn.metrics import roc_auc_score
+
+        if y_true.max() == y_true.min():
+            return float("nan")
+        return float(roc_auc_score(y_true, score, max_fpr=max_fpr))
 
     def complexity(self) -> int:
         return 0 if self.net is None else int(sum(p.numel() for p in self.net.parameters()))

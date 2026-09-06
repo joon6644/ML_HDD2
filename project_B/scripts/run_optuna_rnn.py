@@ -1,8 +1,15 @@
 """LSTM/GRU 하이퍼파라미터 탐색 (--cell 로 고른다).
 
     python scripts/run_optuna_rnn.py --trials 40 --cell lstm
-    python scripts/run_optuna_rnn.py --trials 40 --resume
-    python scripts/run_optuna_rnn.py --report
+    python scripts/run_optuna_rnn.py --report --cell lstm   # 재탐색 없이 집계만
+
+이어 돌리기: study 가 SQLite 에 남으므로 --trials 를 늘리면 같은 study 를
+그대로 이어간다. 40회를 돌고 결과가 무의미하면
+
+    python scripts/run_optuna_rnn.py --cell lstm --trials 80
+
+로 40회를 더 붙인다. TPE 는 앞선 40회를 전부 활용한다. 매 판의 결과와
+"더 돌릴 가치가 있는가" 판정은 results/tuning_log.md 에 쌓인다.
 
 순환 계열(LSTM/GRU)을 대상으로 한다. 분할·피처·정규화·불균형 처리는
 전부 고정하고 신경망 하이퍼파라미터만 바꾼다.
@@ -60,10 +67,10 @@ from hddpred.models.sequence import RNNModel  # noqa: E402
 from export_results import disk_rank, load_part, month_windows, rescale  # noqa: E402
 
 DRIVE = "TOSHIBA_20MG07ACA14TA"
-BASE_EXPERIMENT = "toslb_14"          # lookback 14 확정판
+BASE_EXPERIMENT = "toslb_14_pauc"     # lookback 14 확정판 (pAUC 감시)
 SEED = 42
 PAUC_MAX_FPR = 0.05
-STUDY_NAME_FMT = "{cell}_tos_win10_pauc5_v2"
+STUDY_NAME_FMT = "{cell}_tos_win10_pauc5_mon"
 STUDY_DB = ROOT / "runs" / "optuna" / "rnn.db"
 RESULT_DIR = ROOT / "results"
 
@@ -74,7 +81,9 @@ FIXED_TRAINING = {
     "loss": "bce",
     "auto_pos_weight": False,
     "early_stopping_patience": 5,
-    "early_stopping_metric": "val_pr_auc",
+    # 조기종료 감시값도 목적함수와 같은 pAUC 로 맞춘다. 이 값이 그대로
+    # trial.report 로 나가므로 가지치기 기준도 함께 정합해진다.
+    "early_stopping_metric": "val_pauc",
     "grad_clip": 1.0,
     "num_workers": 0,
     "amp": True,
@@ -112,8 +121,56 @@ def suggest(trial, cell: str):
     return params, training
 
 
-def val_pauc(model, parts) -> float:
-    """검증 구간의 부분 AUC. 월별 창의 디스크 점수를 이어 붙여 계산한다."""
+def record_run(cell: str, study_name: str, frame, n_pruned: int, n_attempted: int) -> str:
+    """탐색 한 판을 results/tuning_log.md 에 append 한다.
+
+    같은 study 를 --trials 를 늘려 이어 돌릴 수 있으므로, 매 판이 어디까지
+    갔고 무엇이 나왔는지 남겨 둬야 "더 돌릴 가치가 있나" 를 판단할 수 있다.
+    """
+    from datetime import datetime
+
+    best = frame.iloc[0]
+    spread = float(frame.pauc.max() - frame.pauc.min()) if len(frame) > 1 else 0.0
+    top5 = frame.head(5).pauc
+    top_spread = float(top5.max() - top5.min()) if len(top5) > 1 else 0.0
+    # 상위권이 서로 구분되지 않으면 더 돌려도 같은 자리를 맴돌 확률이 높다.
+    verdict = ("상위권이 구분되지 않는다 (상위 5개 폭 %.4f). 더 돌려도 같은 자리일 "
+               "가능성이 높다." % top_spread) if top_spread < 0.005 else \
+              ("상위권이 갈린다 (상위 5개 폭 %.4f). 더 돌릴 가치가 있다." % top_spread)
+
+    line = (
+        f"\n## {datetime.now():%Y-%m-%d %H:%M} — {cell.upper()} / `{study_name}`\n\n"
+        f"- 시도 {n_attempted}회 → 완료 {len(frame)} / 가지치기 {n_pruned}\n"
+        f"- 최고 val pAUC@FAR<=5% **{best.pauc:.4f}** (trial {int(best.trial)}): "
+        f"hidden {int(best.hidden_size)}, layers {int(best.num_layers)}, "
+        f"lr {best.learning_rate:.2e}, wd {best.weight_decay:.2e}, "
+        f"batch {int(best.batch_size)}\n"
+        f"- 완료 시도 전체 폭 {spread:.4f}, 상위 5개 폭 {top_spread:.4f}\n"
+        f"- 판정: {verdict}\n"
+        f"- 이어 돌리려면: `python scripts/run_optuna_rnn.py --cell {cell} "
+        f"--trials {n_attempted + 40}` (같은 study 에 40회 추가)\n"
+    )
+    path = RESULT_DIR / "tuning_log.md"
+    if not path.exists():
+        path.write_text(
+            "# 하이퍼파라미터 탐색 기록\n\n"
+            "`scripts/run_optuna_rnn.py` 가 append 한다.\n\n"
+            "study 는 SQLite 에 남아 있어 `--trials` 를 늘리면 같은 study 를\n"
+            "이어서 탐색한다 (TPE 가 앞선 결과를 그대로 활용한다).\n",
+            encoding="utf-8")
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(line)
+    return verdict
+
+
+def val_pauc(model, parts) -> tuple[float, float]:
+    """검증 구간의 부분 AUC와 FAR 1% 재현율.
+
+    목적함수는 pAUC 하나지만 재현율도 같이 돌려준다. pAUC@FAR<=5% 는
+    0~5% 전체 면적이라 5% 근처만 좋아져도 값이 오른다 — 논문이 헤드라인으로
+    쓰는 FAR 1% 운영점과 어긋날 수 있어서, 시행마다 둘을 같이 남겨
+    나중에 어긋남 자체를 관찰할 수 있게 한다. 선정에는 쓰지 않는다.
+    """
     ranks, flags = [], []
     for part in parts:
         rank, has_window = disk_rank(model, part, "in_horizon")
@@ -121,7 +178,10 @@ def val_pauc(model, parts) -> float:
         flags.append(has_window.to_numpy())
     score = np.concatenate(ranks)
     actual = np.concatenate(flags).astype(int)
-    return float(roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
+    pauc = float(roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
+    thr = float(np.quantile(score[actual == 0], 0.99))
+    recall = float(((score >= thr) & (actual == 1)).sum() / max((actual == 1).sum(), 1))
+    return pauc, recall
 
 
 def main() -> int:
@@ -129,7 +189,7 @@ def main() -> int:
     ap.add_argument("--trials", type=int, default=40)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--report", action="store_true")
-    ap.add_argument("--cell", default="lstm", choices=["lstm", "gru"])
+    ap.add_argument("--cell", default="gru", choices=["gru", "lstm"])
     args = ap.parse_args()
     study_name = STUDY_NAME_FMT.format(cell=args.cell)
 
@@ -193,8 +253,9 @@ def main() -> int:
             model.epoch_callback = on_epoch
             model.fit(train, val_full)
             model.epoch_callback = None
-            score = val_pauc(model, val_months)
+            score, recall01 = val_pauc(model, val_months)
             trial.set_user_attr("pauc", score)
+            trial.set_user_attr("recall01", recall01)
             trial.set_user_attr("epochs", model.fit_info.get("epochs_run"))
             return score
 

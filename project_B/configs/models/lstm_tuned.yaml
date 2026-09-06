@@ -4,12 +4,12 @@
 #   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.
 #   scripts/run_optuna_rnn.py 가 생성한다. 직접 고치지 마라.
 
-name: gru_tuned
+name: lstm_tuned
 family: sequence
 class: hddpred.models.sequence.RNNModel
 params:
-  cell: gru
-  hidden_size: 32
+  cell: lstm
+  hidden_size: 128
   num_layers: 1
   dropout: 0.0
   bidirectional: false
@@ -19,10 +19,10 @@ training:
   loss: bce
   auto_pos_weight: false
   early_stopping_patience: 5
-  early_stopping_metric: val_pauc
+  early_stopping_metric: val_pr_auc
   grad_clip: 1.0
   num_workers: 0
   amp: true
-  learning_rate: 0.00454862420872194
-  weight_decay: 1.044195710380448e-06
+  learning_rate: 0.0004274218324036844
+  weight_decay: 2.849988343697162e-05
   batch_size: 2048

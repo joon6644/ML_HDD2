@@ -1,0 +1,100 @@
+# tos_select 를 조기종료 감시지표 val pAUC@FAR<=5% 로 다시 뽑는다.
+# 에폭 단위 조기종료가 있는 torch 계열(LSTM/GRU/TCN/MLP)만 대상이다.
+# RandomForest 는 조기종료가 없고 XGBoost/LightGBM 은 부스팅 라운드
+# 선택이라 축이 달라, tos_select 값을 그대로 쓴다.
+
+#   exclude_incomplete_tail 을 끈다. 그 규칙은 말단 10일의 라벨을
+#   확정할 수 없다는 이유로 마지막 달을 통째로 빼는데, 창 검열
+#   (censoring_scope: window) 은 어차피 모든 달의 마지막 10일을
+#   버린다. 다른 달은 '다음 달 데이터가 있어도 창 밖이라 안 본다'는
+#   선택이고 3월은 '데이터가 없어 못 본다'는 강제일 뿐, 정보량은 같다.
+#   도시바 2026-03 은 함대 37,202대가 31일까지 정상 관측되고 고장도
+#   36건으로 정상 범위(18~51)다. HGST 처럼 오염돼 있지 않다.
+#
+#   검증 임곗값도 월별 창으로 쪼개 풀링한다 (export_results.val_disk_rank).
+#   디스크 점수가 창 안 최댓값이라, val 을 두 달 한 창으로 두면 50일
+#   최댓값으로 잡은 임곗값을 20일 최댓값에 들이대게 된다.
+
+# 후보 모델 비교 — 도시바 10-2-6, 음성 표집 없음.
+#
+# CNN1D 는 후보에서 뺐다. TCN 과 같은 시간축 1D 합성곱 계열인데, TCN 이
+# dilation 으로 수용 영역을 지수적으로 넓히고 causal padding 을 쓰는 더
+# 원칙적인 구성이다. HGST 실측에서도 TCN 이 앞섰다 (val pAUC 0.738 vs 0.713,
+# test pAUC 0.709 vs 0.698). 도시바 결과를 보기 전에, 그 사전 근거로 뺐다.
+#
+# 학습 10개월 - 검증 2개월 - 테스트 6개월(월 단위), 재학습 없음.
+# 후보 8종이 전부 같은 조건에서 돈다.
+#
+# 통제 조건:
+#   - 원본 SMART 피처만 쓴다 (파생 전부 off). 파생변수 효과는 별도 축이다.
+#   - 손실 가중 없음. 불균형은 임곗값으로만 다룬다.
+#   - 시퀀스는 lookback 14일 + min-max 정규화. z-score 는 SMART 카운터의
+#     긴 꼬리 때문에 입력이 [-1.95, 27.73] 까지 벌어져 RNNNet(정규화 레이어
+#     없음)의 게이트를 포화시킨다. 실측에서 min-max 가 LSTM/GRU 를 크게
+#     끌어올렸다.
+#
+#   - 음성 표집을 하지 않는다. stride 는 계산 비용을 줄이지만 양성 비율을
+#     0.032% -> 0.064% 로 바꾸고, 모델 계열마다 기저율 변화에 반응이 다를 수
+#     있어 비교를 오염시킨다. 모든 모델에 똑같이 적용해도 마찬가지다.
+#     stride 판은 tos_select_stride2 로 따로 남겨 순위가 바뀌는지 대조한다.
+
+experiment: tos_select_pauc
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/mlp_pauc.yaml
+- configs/models/lstm_pauc.yaml
+- configs/models/gru_pauc.yaml
+- configs/models/tcn_pauc.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: none
+  models.mlp_pauc.training.loss: bce
+  models.mlp_pauc.training.auto_pos_weight: false
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: false
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.base.include_age: false
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows: []
+  features.sequence.lookback_days: 14
+  features.scaling.method: minmax
+  models.tcn_pauc.training.loss: bce
+  models.tcn_pauc.training.auto_pos_weight: false
+  models.lstm_pauc.training.loss: bce
+  models.lstm_pauc.training.auto_pos_weight: false
+  models.gru_pauc.training.loss: bce
+  models.gru_pauc.training.auto_pos_weight: false
+output_root: ${project_root}/runs

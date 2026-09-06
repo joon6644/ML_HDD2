@@ -1,0 +1,31 @@
+# gru.yaml 과 같되 조기종료 감시지표만 val pAUC@FAR<=5% 로 바꾼 판.
+# Optuna 목적함수와 같은 관심 구간을 보게 한다 (행 단위이므로 완전히
+# 같은 값은 아니다). PR-AUC 감시본과의 비교용.
+
+name: gru_pauc
+family: sequence
+class: hddpred.models.sequence.RNNModel
+
+params:
+  cell: gru
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  bidirectional: false
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  # 손실. 설명은 configs/models/lstm.yaml 참고.
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

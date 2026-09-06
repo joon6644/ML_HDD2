@@ -1,0 +1,35 @@
+# lstm.yaml 과 같되 조기종료 감시지표만 val pAUC@FAR<=5% 로 바꾼 판.
+# 탐색 목적함수와 같은 관심 구간을 보게 한다 (행 단위이므로 완전히
+# 같은 값은 아니다).
+
+name: lstm_pauc
+family: sequence
+class: hddpred.models.sequence.RNNModel
+
+params:
+  cell: lstm
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  bidirectional: false
+
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  # 손실. focal 은 쉬운 음성의 기여를 (1-p_t)^gamma 로 눌러서, 압도적으로 많은
+  # 쉬운 음성이 손실을 지배하는 것을 막는다. 행 기준 양성 비율이 0.065%다.
+  #   focal_alpha: 숫자 또는 auto(= 1 - train 양성비율)
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  # focal 의 alpha 가 클래스 가중을 담당하므로 pos_weight 는 끈다.
+  # (켜도 focal 사용 시 무시된다. 보정이 두 번 걸리기 때문)
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

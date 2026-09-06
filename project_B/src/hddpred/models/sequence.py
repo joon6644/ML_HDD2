@@ -416,6 +416,20 @@ class TorchSequenceModel(BaseModel):
             return float("nan")
         return float(average_precision_score(y_true, score))
 
+    @staticmethod
+    def _pauc(y_true: np.ndarray, score: np.ndarray, max_fpr: float = 0.05) -> float:
+        """FAR <= max_fpr 구간의 부분 AUC (McClish 표준화).
+
+        Optuna 목적함수와 같은 모양의 값이다. 다만 목적함수는 디스크 단위
+        월별 창에서 재고 이건 행 단위 val 전체에서 잰다 — 같은 값이 아니라
+        같은 관심 구간을 본다는 뜻이다.
+        """
+        from sklearn.metrics import roc_auc_score
+
+        if y_true.max() == y_true.min():
+            return float("nan")
+        return float(roc_auc_score(y_true, score, max_fpr=max_fpr))
+
     # -- 인터페이스 ---------------------------------------------------------
     def fit(self, train, val) -> dict:
         torch.manual_seed(self.seed)
@@ -451,6 +465,17 @@ class TorchSequenceModel(BaseModel):
         train_loader = self._loader(train, shuffle=True)
         patience = int(self.training.get("early_stopping_patience", 5))
         epochs = int(self.training.get("epochs", 30))
+        # 어떤 val 지표로 최적 에폭을 고를지. 둘 다 클수록 좋다.
+        monitor = str(self.training.get("early_stopping_metric", "val_pr_auc"))
+        if monitor == "val_pr_auc":
+            monitor_fn = self._pr_auc
+        elif monitor == "val_pauc":
+            monitor_fn = self._pauc
+        else:
+            raise ValueError(
+                f"알 수 없는 early_stopping_metric: {monitor!r} "
+                "(val_pr_auc | val_pauc)"
+            )
 
         best_score, best_epoch, best_state, waited = -np.inf, -1, None, 0
         history = []
@@ -473,17 +498,17 @@ class TorchSequenceModel(BaseModel):
                 total_loss += float(loss.item()) * batch_y.shape[0]
                 seen += int(batch_y.shape[0])
 
-            val_score = self._pr_auc(val.y, self.predict_proba(val))
+            val_score = monitor_fn(val.y, self.predict_proba(val))
             history.append(
                 {
                     "epoch": epoch,
                     "train_loss": total_loss / max(seen, 1),
-                    "val_pr_auc": val_score,
+                    monitor: val_score,
                 }
             )
             print(
                 f"      epoch {epoch:02d} loss={total_loss / max(seen, 1):.5f} "
-                f"val_pr_auc={val_score:.5f}"
+                f"{monitor}={val_score:.5f}"
             )
 
             if np.isfinite(val_score) and val_score > best_score:
@@ -511,6 +536,7 @@ class TorchSequenceModel(BaseModel):
             "lookback": int(train.lookback),
             "best_epoch": best_epoch,
             "best_val_pr_auc": float(best_score),
+            "early_stopping_metric": monitor,
             "epochs_run": len(history),
             "device": str(self.device),
             "n_train": len(train),

@@ -48,7 +48,7 @@ from export_results import (  # noqa: E402
 from run_optuna_rnn import FIXED_TRAINING, PAUC_MAX_FPR  # noqa: E402
 
 DRIVE = "TOSHIBA_20MG07ACA14TA"
-BASE_EXPERIMENT = "toslb_14"
+BASE_EXPERIMENT = "toslb_14_pauc"
 SEED = 42
 FAR_TARGETS = [0.001, 0.005, 0.01, 0.05]
 
@@ -83,7 +83,7 @@ def score(model, parts, thresholds=None):
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="상위 조합을 순위대로 test 채점")
-    ap.add_argument("--cell", default="lstm", choices=["lstm", "gru"])
+    ap.add_argument("--cell", default="gru", choices=["gru", "lstm"])
     ap.add_argument("--top", type=int, default=8)
     args = ap.parse_args()
 

@@ -1,0 +1,63 @@
+# 입력 시퀀스 길이 민감도 — lookback 30일
+#
+# 도시바 10-2-6 (test 2025-10~2026-03), GRU, 원본 피처만, min-max,
+# 불균형 처리 없음, seed 42. lookback 외 모든 축이 같다.
+#
+# GRU 는 순환 구조라 수용 영역이 층 수에 묶이지 않는다. TCN 이었다면
+# 채널·층 수를 같이 조정해야 해서 '길이 효과' 와 '용량 효과' 가 섞인다.
+#
+# lookback 을 늘리면 창을 못 채우는 표본이 늘지만 short_history: pad 가
+# 버리지 않고 segment 첫 행 복제 + mask 채널로 표시하므로, 평가 모집단은
+# 길이와 무관하게 같다.
+
+experiment: toslb_30_pauc
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/gru_pauc.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: none
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: false
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.base.include_age: false
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows: []
+  features.sequence.lookback_days: 30
+  features.scaling.method: minmax
+  models.gru_pauc.training.loss: bce
+  models.gru_pauc.training.auto_pos_weight: false
+output_root: ${project_root}/runs

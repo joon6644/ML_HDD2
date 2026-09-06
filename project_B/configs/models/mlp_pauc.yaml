@@ -1,0 +1,29 @@
+# mlp.yaml 과 같되 조기종료 감시지표만 val pAUC@FAR<=5% 로 바꾼 판.
+
+# 테이블 입력 MLP. 시간 구조를 쓰지 않으면서 비선형만 쓰는 대조군.
+# 트리와 달리 스케일러를 모델이 직접 들고 있고, 결측은 표준화 후 0(평균)으로
+# 채운다.
+
+name: mlp_pauc
+family: tabular
+class: hddpred.models.mlp.MLPModel
+
+params:
+  hidden_dims: [256, 128, 64]
+  dropout: 0.2
+  batch_norm: true
+
+training:
+  epochs: 30
+  batch_size: 4096
+  learning_rate: 0.001
+  weight_decay: 0.00001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  scaling:
+    method: standard
+    clip_quantile: [0.001, 0.999]

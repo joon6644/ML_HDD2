@@ -1,9 +1,9 @@
-"""LSTM 의 Integrated Gradients 분석 — notion.md 4장의 XAI 그림.
+"""GRU 의 Integrated Gradients 분석 — notion.md 4장의 XAI 그림.
 
-    python scripts/run_ig.py --experiment toslb_14 --model lstm
-    python scripts/run_ig.py --experiment tos_proposed --model lstm_tuned --sample 20000
+    python scripts/run_ig.py                       # 기본: tos_proposed / gru_tuned
+    python scripts/run_ig.py --experiment toslb_14 --model gru --sample 20000
 
-LSTM 은 트리 모델이 아니라 TreeSHAP 을 못 쓴다. 대신 Integrated Gradients
+GRU 는 트리 모델이 아니라 TreeSHAP 을 못 쓴다. 대신 Integrated Gradients
 (Sundararajan, Taly & Yan, ICML 2017)를 쓴다. 미분 가능한 모델이면 어디에나
 적용되고, 아래 완결성 공리로 구현이 맞는지 스스로 검증할 수 있다.
 
@@ -88,10 +88,14 @@ def integrated_gradients(net, x, steps=STEPS):
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="LSTM Integrated Gradients")
-    ap.add_argument("--experiment", default="toslb_14")
-    ap.add_argument("--model", default="lstm")
+    ap = argparse.ArgumentParser(description="GRU Integrated Gradients")
+    ap.add_argument("--experiment", default="tos_proposed")
+    ap.add_argument("--model", default="gru_tuned")
     ap.add_argument("--sample", type=int, default=20000)
+    ap.add_argument("--drop-mask", action="store_true",
+                    help="패딩 표시 채널(_mask)을 그림에서 뺀다")
+    ap.add_argument("--replot", action="store_true",
+                    help="results/ig_values.npz 로 그림만 다시 그린다")
     args = ap.parse_args()
 
     import matplotlib
@@ -112,6 +116,15 @@ def main() -> int:
     record = json.loads((run / "fold_metrics.json").read_text(encoding="utf-8"))
     scaler = (fold_mod.Scaler.from_state_dict(record["scaler"])
               if record.get("scaler") else None)
+
+    cache = ROOT / "results" / "ig_values.npz"
+    if args.replot:
+        z = np.load(cache, allow_pickle=True)
+        ig, val = z["ig"], z["x"]
+        columns = [str(c) for c in z["columns"]]
+        print(f"[ig] {cache.name} 재사용, 표본 {ig.shape[0]:,}개")
+        rng = np.random.default_rng(0)
+        return draw(ig, val, columns, rng, args.drop_mask)
 
     print("[ig] test 구간 적재", flush=True)
     parts = [rescale(load_part(prepared, pipeline, "sequence", *f.window("test"),
@@ -160,6 +173,16 @@ def main() -> int:
     columns = list(parts[0].columns)
     if ig.shape[2] == len(columns) + 1:
         columns = columns + ["_mask"]     # pad 모드에서 붙는 채널
+    np.savez_compressed(ROOT / "results" / "ig_values.npz",
+                        ig=ig.astype(np.float32), x=val.astype(np.float32),
+                        columns=np.array(columns))
+    return draw(ig, val, columns, rng, args.drop_mask)
+
+
+def draw(ig, val, columns, rng, drop_mask=False):
+    """저장된 IG 로 그림 두 장과 CSV 두 개를 만든다."""
+    import matplotlib.pyplot as plt
+    import pandas as pd
     clean = [c.replace("smart_", "").replace("_raw", "") for c in columns]
 
     # --- (1) 시간축을 접어 변수별 중요도 ---------------------------------
@@ -167,10 +190,6 @@ def main() -> int:
     importance = per_feature.mean(axis=0)
     order = np.argsort(-importance)[:15]
 
-    np.savez_compressed(ROOT / "results" / "ig_values.npz",
-                        ig=ig.astype(np.float32), x=val.astype(np.float32),
-                        columns=np.array(columns))
-    import pandas as pd
     pd.DataFrame({"column": [clean[i] for i in np.argsort(-importance)],
                   "mean_abs_ig": importance[np.argsort(-importance)]}).to_csv(
         ROOT / "results" / "ig_importance.csv", index=False, encoding="utf-8-sig")
@@ -186,6 +205,9 @@ def main() -> int:
         jitter = (rng.random(v.shape[0]) - 0.5) * 0.34
         ax.scatter(v, row + jitter, c=c, cmap="coolwarm", s=2.2,
                    alpha=0.45, linewidths=0, rasterized=True)
+    # 197 처럼 드물게 매우 큰 기여를 내는 변수가 있어, 그대로 두면 x 축이
+    # 그쪽에 끌려가 나머지 분포가 0 근처에 뭉갠다. 상위 0.1% 지점에서 자른다.
+    ax.set_xlim(0, float(np.percentile(per_feature, 99.9)) * 1.2)
     ax.set_yticks(range(len(rows)))
     ax.set_yticklabels([clean[i] for i in rows])
     ax.set_xlabel("mean |Integrated Gradients| over lookback")
@@ -231,7 +253,51 @@ def main() -> int:
     print(f"\n--- 시점별 중요도 (예측일로부터) ---")
     for day, value in zip(days, mean):
         print(f"  {day:>2}일 전  {value:.6f}")
-    for name in ("ig_summary.png", "ig_time_importance.png",
+    # --- (3) 두 축을 함께: 시점 x 변수 히트맵 -----------------------------
+    # 행 합이 변수별 중요도, 열 합이 시점별 중요도라 위 두 그림을 그대로 담고,
+    # 거기에 "어떤 변수가 언제 중요한가" 를 더한다. 두 주변분포의 외적으로
+    # 근사하면 상대오차가 40% 나오므로, 이 상호작용은 실재한다.
+    from matplotlib.colors import PowerNorm
+
+    M = np.abs(ig).mean(axis=0)                    # (T, F)
+    hcols = list(clean)
+    if drop_mask and "_mask" in hcols:
+        k = hcols.index("_mask")
+        M = np.delete(M, k, axis=1)
+        hcols = [c for i, c in enumerate(hcols) if i != k]
+    pick = np.argsort(-M.sum(axis=0))[:12]         # 중요한 것이 위로
+    H = M[:, pick].T
+    T_ = H.shape[1]
+
+    fig = plt.figure(figsize=(7.4, 5.0), dpi=200)
+    gs = fig.add_gridspec(2, 3, width_ratios=[1, 0.17, 0.035],
+                          height_ratios=[0.17, 1], wspace=0.04, hspace=0.05)
+    hx = fig.add_subplot(gs[1, 0])
+    ht = fig.add_subplot(gs[0, 0], sharex=hx)
+    hr = fig.add_subplot(gs[1, 1], sharey=hx)
+    hc = fig.add_subplot(gs[1, 2])
+    im = hx.imshow(H, aspect="auto", cmap="Reds", norm=PowerNorm(gamma=0.5),
+                   extent=(-0.5, T_ - 0.5, len(pick) - 0.5, -0.5))
+    hx.set_xticks(range(T_)); hx.set_xticklabels(range(T_ - 1, -1, -1))
+    hx.set_yticks(range(len(pick)))
+    hx.set_yticklabels([hcols[i] for i in pick])
+    hx.set_xlabel("Days before prediction (0 = prediction day)")
+    hx.set_ylabel("SMART attribute")
+    ht.bar(range(T_), H.sum(axis=0), color="#c0392b", width=0.75)
+    ht.set_ylabel("sum", fontsize=8, rotation=0, labelpad=14, va="center")
+    ht.tick_params(labelbottom=False); ht.set_yticks([])
+    hr.barh(range(len(pick)), H.sum(axis=1), color="#c0392b", height=0.75)
+    hr.tick_params(labelleft=False); hr.set_xticks([]); hr.set_xlabel("sum", fontsize=8)
+    for a, sides in ((ht, ("top", "right", "left")), (hr, ("top", "right", "bottom"))):
+        for s in sides:
+            a.spines[s].set_visible(False)
+    for s in ("top", "right"):
+        hx.spines[s].set_visible(False)
+    fig.colorbar(im, cax=hc).set_label("mean |Integrated Gradients|", fontsize=9)
+    fig.savefig(ROOT / "results" / "ig_heatmap.png", bbox_inches="tight")
+    plt.close(fig)
+
+    for name in ("ig_summary.png", "ig_time_importance.png", "ig_heatmap.png",
                  "ig_importance.csv", "ig_time_importance.csv"):
         print(f"[저장] {ROOT / 'results' / name}")
     return 0

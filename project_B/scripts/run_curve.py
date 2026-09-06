@@ -25,6 +25,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import json
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,19 +36,20 @@ from hddpred import config as cfg_mod  # noqa: E402
 from hddpred import paths  # noqa: E402
 from hddpred.experiments.runner import Pipeline, prepare_drive  # noqa: E402
 from hddpred.models import registry  # noqa: E402
-from export_results import disk_rank, load_part  # noqa: E402
+from export_results import disk_rank, load_part, rescale  # noqa: E402
+from hddpred.features import fold as fold_mod  # noqa: E402
 
-DRIVE = "HGST_20HUH721212ALN604"
+DRIVE = "TOSHIBA_20MG07ACA14TA"
 SEED = 42
 RULE = "in_horizon"
 FAR_MARK = 0.01  # 표가 읽는 운영점
 # (범례, experiment, model, 색, 선굵기)
 ARMS = [
-    ("Baseline", "feat_raw_only", "xgboost", "#7f8c8d", 1.6),
-    ("+ Feature", "feat_asfd7", "xgboost", "#2e6fb7", 1.8),
-    ("Proposed", "feat_asfd7_tuned", "xgboost_tuned", "#c0392b", 2.2),
+    ("Proposed (tuned GRU)", "tos_proposed", "gru_tuned", "#2e6fb7", 2.0),
 ]
-GRID = np.logspace(np.log10(1e-4), 0.0, 300)  # 0.01% ~ 100%
+# 관심 구간만 본다. pAUC@FAR<=5% 가 적분하는 범위와 같아서, 그림의 곡선
+# 아래 면적이 곧 그 지표가 된다.
+GRID = np.linspace(2e-4, 0.05, 300)   # 0.02% ~ 5%
 
 
 def disk_scores(experiment: str, model_name: str):
@@ -65,60 +67,93 @@ def disk_scores(experiment: str, model_name: str):
     model = registry.resolve_class(mcfg["class"]).load(
         paths.run_dir(experiment, DRIVE, model_name, SEED, 0) / "model"
     )
-    scores, failed = [], []
+    # 시퀀스 계열은 학습 때 fold train 구간 스케일러를 거쳤다. 채점에도
+    # 같은 스케일러를 먹여야 한다 — 빼먹으면 모델이 상수를 뱉는다.
+    record = json.loads(
+        (paths.run_dir(experiment, DRIVE, model_name, SEED, 0)
+         / "fold_metrics.json").read_text(encoding="utf-8"))
+    scaler = (fold_mod.Scaler.from_state_dict(record["scaler"])
+              if record.get("scaler") else None)
+    months = []
     for fold in folds:
         start, end = fold.window("test")
         part = load_part(prepared, pipeline, mcfg["family"], start, end, horizon, 8)
+        if mcfg["family"] == "sequence":
+            part = rescale(part, scaler)
         rank, has_window = disk_rank(model, part, RULE)
-        scores.append(rank.to_numpy())
-        failed.append(has_window.to_numpy())
-    return np.concatenate(scores), np.concatenate(failed).astype(bool)
+        months.append((rank.to_numpy(), has_window.to_numpy().astype(bool)))
+    return months
 
 
-def curve(scores: np.ndarray, failed: np.ndarray) -> np.ndarray:
-    """목표 FAR 격자마다 Recall 을 읽는다."""
-    healthy = scores[~failed]
-    broken = scores[failed]
-    # 미고장 점수의 상위 f 지점. f 가 곧 FAR 이 된다.
-    thresholds = np.quantile(healthy, 1.0 - GRID)
-    return (broken[:, None] >= thresholds[None, :]).mean(axis=0)
+def curve(months) -> np.ndarray:
+    """목표 FAR 격자마다 Recall 을 읽고 달끼리 평균한다.
+
+    3.4 의 집계 규칙과 같다 — 달마다 따로 산출한 뒤 평균이지 풀링이 아니다.
+    임곗값도 달마다 그 달의 미고장 점수 분위수로 잡으므로, 실현 FAR 이 전
+    구간에서 격자값과 일치한다.
+    """
+    per_month = []
+    for scores, failed in months:
+        thresholds = np.quantile(scores[~failed], 1.0 - GRID)
+        per_month.append((scores[failed][:, None] >= thresholds[None, :]).mean(axis=0))
+    return np.asarray(per_month)          # (달, 격자)
 
 
 def main() -> int:
+    import argparse
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.ticker import FuncFormatter
+
+    ap = argparse.ArgumentParser(description="FAR-재현율 곡선")
+    ap.add_argument("--replot", action="store_true",
+                    help="results/recall_far_curve.npz 로 그림만 다시 그린다")
+    args = ap.parse_args()
 
     results = {}
-    for label, experiment, model_name, _, _ in ARMS:
+    if args.replot:
+        z = np.load(ROOT / "results" / "recall_far_curve.npz")
+        # 범례 이름을 바꿔도 예전 npz 를 계속 쓸 수 있게, 키가 없으면
+        # experiment/model 로 저장된 별칭을 찾는다.
+        alias = {"Proposed (tuned GRU)": "GRU (tuned)"}
+        for label, _, _, _, _ in ARMS:
+            key = label if label in z.files else alias.get(label, label)
+            results[label] = z[key]
+        print(f"[curve] npz 재사용: {list(results)}", flush=True)
+    for label, experiment, model_name, _, _ in (
+            [] if args.replot else ARMS):
         print(f"[curve] {label} ({experiment} / {model_name})", flush=True)
-        scores, failed = disk_scores(experiment, model_name)
-        results[label] = curve(scores, failed)
-        at = float(np.interp(FAR_MARK, GRID, results[label]))
-        print(f"  고장 {int(failed.sum())}대 / 정상 {int((~failed).sum()):,}대"
+        months = disk_scores(experiment, model_name)
+        results[label] = curve(months)
+        at = float(np.interp(FAR_MARK, GRID, results[label].mean(axis=0)))
+        nf = sum(int(f.sum()) for _, f in months)
+        nh = sum(int((~f).sum()) for _, f in months)
+        print(f"  고장 {nf}대 / 정상 {nh:,}대 (월 {len(months)}창)"
               f" | FAR {FAR_MARK:.0%} 에서 Recall {at:.3f}", flush=True)
 
-    np.savez_compressed(ROOT / "results" / "recall_far_curve.npz",
-                        grid=GRID, **results)
+    if not args.replot:
+        np.savez_compressed(ROOT / "results" / "recall_far_curve.npz",
+                            grid=GRID, **results)
 
     fig, ax = plt.subplots(figsize=(6.4, 4.4), dpi=200)
-    ax.axvline(FAR_MARK * 100, color="#b0b0b0", lw=0.9, ls=":", zorder=1)
     for label, _, _, color, lw in ARMS:
-        ax.plot(GRID * 100, results[label], color=color, lw=lw, label=label, zorder=3)
+        band = results[label]
+        # 선은 여섯 달의 평균, 띠는 달별 최소~최대. 달 간 폭이 모델 간 격차보다
+        # 큰지를 눈으로 바로 확인할 수 있게 한다.
+        ax.fill_between(GRID * 100, band.min(axis=0), band.max(axis=0),
+                        color=color, alpha=0.13, lw=0, zorder=2)
+        ax.plot(GRID * 100, band.mean(axis=0), color=color, lw=lw,
+                label=label, zorder=3)
 
-    ax.set_xscale("log")
-    ax.set_xlim(0.01, 100)
+    ax.set_xlim(0, 5)
     ax.set_ylim(0, 1)
-    ax.set_xlabel("False Alarm Rate (%, log scale)")
+    ax.set_xlabel("False Alarm Rate (%)")
     ax.set_ylabel("Recall")
-    ax.set_xticks([0.01, 0.1, 1, 10, 100])
-    ax.xaxis.set_major_formatter(FuncFormatter(
-        lambda v, _: f"{v:g}" if v >= 1 else f"{v}".rstrip("0").rstrip(".")))
     ax.grid(True, which="major", alpha=0.25, lw=0.6)
-    ax.legend(loc="lower right", frameon=False, fontsize=9)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
+    # 네모 박스: 네 변을 모두 남긴다.
+    for side in ("top", "right", "bottom", "left"):
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_linewidth(0.8)
     fig.tight_layout()
     out = ROOT / "results" / "recall_far_curve.png"
     fig.savefig(out)
