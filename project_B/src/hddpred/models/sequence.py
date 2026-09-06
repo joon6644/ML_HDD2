@@ -348,6 +348,10 @@ class TorchSequenceModel(BaseModel):
         self.net: nn.Module | None = None
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._warm_state: dict | None = None
+        # 하이퍼파라미터 탐색이 매 에폭의 val 점수를 받아 가지치기할 수 있게
+        # 하는 훅. (epoch, best_val_pr_auc) 를 받는다. None 이면 학습 경로는
+        # 평소와 완전히 같다.
+        self.epoch_callback = None
 
     def warm_start(self, previous) -> bool:
         """직전 fold 의 가중치를 초기값으로 가져온다.
@@ -492,6 +496,12 @@ class TorchSequenceModel(BaseModel):
                 if waited >= patience:
                     print(f"      early stopping (patience {patience})")
                     break
+
+            # 하이퍼파라미터 탐색용 훅. 매 에폭의 val 점수를 밖으로 넘겨서,
+            # 가망 없는 조합을 끝까지 학습하지 않고 끊을 수 있게 한다.
+            # 설정하지 않으면 아무 일도 하지 않으므로 평소 학습 경로는 그대로다.
+            if self.epoch_callback is not None:
+                self.epoch_callback(epoch, float(best_score))
 
         if best_state is not None:
             self.net.load_state_dict(best_state)

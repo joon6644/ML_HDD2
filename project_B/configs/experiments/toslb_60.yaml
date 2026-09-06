@@ -1,26 +1,14 @@
-#   exclude_incomplete_tail 을 끈다. 그 규칙은 말단 10일의 라벨을
-#   확정할 수 없다는 이유로 마지막 달을 통째로 빼는데, 창 검열
-#   (censoring_scope: window) 은 어차피 모든 달의 마지막 10일을
-#   버린다. 다른 달은 '다음 달 데이터가 있어도 창 밖이라 안 본다'는
-#   선택이고 3월은 '데이터가 없어 못 본다'는 강제일 뿐, 정보량은 같다.
-#   도시바 2026-03 은 함대 37,202대가 31일까지 정상 관측되고 고장도
-#   36건으로 정상 범위(18~51)다. HGST 처럼 오염돼 있지 않다.
-#
-#   검증 임곗값도 월별 창으로 쪼개 풀링한다 (export_results.val_disk_rank).
-#   디스크 점수가 창 안 최댓값이라, val 을 두 달 한 창으로 두면 50일
-#   최댓값으로 잡은 임곗값을 20일 최댓값에 들이대게 된다.
-
 # 입력 시퀀스 길이 민감도 — lookback 60일
 #
-# 도시바 10-2-6, LSTM, 원본 피처만, min-max, 불균형 처리 없음.
-# lookback 외 모든 축이 tosimb_none 과 같다.
+# 도시바 10-2-6 (test 2025-10~2026-03), GRU, 원본 피처만, min-max,
+# 불균형 처리 없음, seed 42. lookback 외 모든 축이 같다.
 #
-# LSTM 은 TCN 과 달리 수용 영역이 층 수에 묶이지 않으므로 lookback 만
-# 바꾸면 된다. TCN 이었다면 채널 수도 같이 조정해야 한다.
+# GRU 는 순환 구조라 수용 영역이 층 수에 묶이지 않는다. TCN 이었다면
+# 채널·층 수를 같이 조정해야 해서 '길이 효과' 와 '용량 효과' 가 섞인다.
 #
-# lookback 을 늘리면 창을 못 채우는 표본이 늘어난다. short_history: pad 라
-# 버리지 않고 그 segment 첫 행으로 복제 + mask 채널로 표시하므로 평가
-# 모집단은 길이와 무관하게 같다.
+# lookback 을 늘리면 창을 못 채우는 표본이 늘지만 short_history: pad 가
+# 버리지 않고 segment 첫 행 복제 + mask 채널로 표시하므로, 평가 모집단은
+# 길이와 무관하게 같다.
 
 experiment: toslb_60
 uses:
@@ -33,7 +21,7 @@ uses:
 drives:
 - TOSHIBA_20MG07ACA14TA
 models:
-- configs/models/lstm.yaml
+- configs/models/gru.yaml
 seeds:
 - 42
 folds:
@@ -70,6 +58,6 @@ overrides:
   features.base.asfd_windows: []
   features.sequence.lookback_days: 60
   features.scaling.method: minmax
-  models.lstm.training.loss: bce
-  models.lstm.training.auto_pos_weight: false
+  models.gru.training.loss: bce
+  models.gru.training.auto_pos_weight: false
 output_root: ${project_root}/runs

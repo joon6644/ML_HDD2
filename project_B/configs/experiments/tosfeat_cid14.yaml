@@ -1,16 +1,17 @@
-# 입력 시퀀스 길이 민감도 — lookback 21일
+# 파생변수 실험 — CID(복잡도) 14일
 #
-# 도시바 10-2-6 (test 2025-10~2026-03), GRU, 원본 피처만, min-max,
-# 불균형 처리 없음, seed 42. lookback 외 모든 축이 같다.
+# toslb_14 (원본 SMART 16개) 와 features.base 축 하나만 다르다.
+# 도시바 10-2-6, GRU, lookback 14, min-max, 불균형 무처리, seed 42.
 #
-# GRU 는 순환 구조라 수용 영역이 층 수에 묶이지 않는다. TCN 이었다면
-# 채널·층 수를 같이 조정해야 해서 '길이 효과' 와 '용량 효과' 가 섞인다.
+# 파생은 derived_on: critical 이라 canonical 에 있는 critical SMART
+# 7개에만 붙는다 (16 원본 + 7 파생 = 23채널).
 #
-# lookback 을 늘리면 창을 못 채우는 표본이 늘지만 short_history: pad 가
-# 버리지 않고 segment 첫 행 복제 + mask 채널로 표시하므로, 평가 모집단은
-# 길이와 무관하게 같다.
+# 사전 예상: RNN 은 lookback 안의 연속된 값을 이미 보므로 창 통계는
+#   원리적으로 재구성 가능한 정보다. 1일 차분에서 실제로 이득이 없었다
+#   (R@1% 0.765 -> 0.761, 학습 2.7배). 창이 lookback(14일)을 넘어서는
+#   경우에만 새 정보가 생길 여지가 있다.
 
-experiment: toslb_21
+experiment: tosfeat_cid14
 uses:
   data: configs/data.yaml
   preprocessing: configs/preprocessing.yaml
@@ -54,9 +55,10 @@ overrides:
   features.base.rolling_windows: []
   features.base.rolling_stats: []
   features.base.include_since_start: false
-  features.base.cid_windows: []
+  features.base.cid_windows:
+  - 14
   features.base.asfd_windows: []
-  features.sequence.lookback_days: 21
+  features.sequence.lookback_days: 14
   features.scaling.method: minmax
   models.gru.training.loss: bce
   models.gru.training.auto_pos_weight: false

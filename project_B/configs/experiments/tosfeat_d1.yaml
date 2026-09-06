@@ -1,16 +1,18 @@
-# 입력 시퀀스 길이 민감도 — lookback 21일
+# 파생변수 실험 — 1일 차분 (d1)
 #
-# 도시바 10-2-6 (test 2025-10~2026-03), GRU, 원본 피처만, min-max,
-# 불균형 처리 없음, seed 42. lookback 외 모든 축이 같다.
+# toslb_14 (원본 SMART 16개만) 과 features.base.diff_lags 하나만 다르다.
+# 도시바 10-2-6, GRU, lookback 14, min-max, 불균형 처리 없음, seed 42.
 #
-# GRU 는 순환 구조라 수용 영역이 층 수에 묶이지 않는다. TCN 이었다면
-# 채널·층 수를 같이 조정해야 해서 '길이 효과' 와 '용량 효과' 가 섞인다.
+# 차분은 critical SMART 중 canonical 에 존재하는 컬럼에만 붙는다
+# (features.base.derived_on: critical). 즉 16개 원본에 7개 차분이 더해진다.
 #
-# lookback 을 늘리면 창을 못 채우는 표본이 늘지만 short_history: pad 가
-# 버리지 않고 segment 첫 행 복제 + mask 채널로 표시하므로, 평가 모집단은
-# 길이와 무관하게 같다.
+# 시퀀스 모델에 차분을 주는 것에 대하여:
+#   RNN 은 lookback 안의 연속된 값을 이미 보므로 1일 차분은 원리적으로
+#   재구성 가능한 정보다. 그래서 이득이 없거나 오히려 입력 차원만 늘려
+#   해로울 수 있다 — TCN+ASFD7 에서 실제로 그런 결과가 나왔다(HGST).
+#   그 자체가 보고할 만한 관찰이라 확인해 둔다.
 
-experiment: toslb_21
+experiment: tosfeat_d1
 uses:
   data: configs/data.yaml
   preprocessing: configs/preprocessing.yaml
@@ -50,13 +52,14 @@ overrides:
   split.train_window: rolling
   split.train_months: 10
   features.base.include_age: false
-  features.base.diff_lags: []
+  features.base.diff_lags:
+  - 1
   features.base.rolling_windows: []
   features.base.rolling_stats: []
   features.base.include_since_start: false
   features.base.cid_windows: []
   features.base.asfd_windows: []
-  features.sequence.lookback_days: 21
+  features.sequence.lookback_days: 14
   features.scaling.method: minmax
   models.gru.training.loss: bce
   models.gru.training.auto_pos_weight: false

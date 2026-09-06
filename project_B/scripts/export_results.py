@@ -132,17 +132,37 @@ def healthy_quantiles(rank, has_window) -> dict[float, float]:
     return {t: float(np.quantile(healthy, 1.0 - t)) for t in FAR_TARGETS}
 
 
-def month_windows(start: date, end: date) -> list[tuple[date, date]]:
-    """구간을 달력 월 경계로 쪼갠다. 양 끝은 원래 구간에 맞춰 자른다."""
+def month_windows(start: date, end: date, min_days: int = 15) -> list[tuple[date, date]]:
+    """구간을 달력 월 경계로 쪼갠다. 양 끝은 원래 구간에 맞춰 자른다.
+
+    val 창이 월 경계에서 시작하지 않는 경우가 있다. 분할이 날짜 오프셋으로
+    잡히기 때문이다 — 실측으로 2025-07-31 ~ 2025-09-30 이 나왔고, 그대로
+    쪼개면 첫 조각이 하루(7/31)짜리가 된다. 그 조각은 창 검열(마지막 H일
+    제거)로 표본이 0 이 되어 채점이 죽는다.
+
+    그래서 min_days 보다 짧은 조각은 이웃에 붙인다. 목적이 "test 와 같은
+    길이의 창에서 디스크 점수를 접는 것" 이므로, 한 달 남짓으로 뭉치는 편이
+    하루짜리를 따로 두는 것보다 목적에 맞는다.
+    """
     out, cursor = [], start
     while cursor <= end:
         if cursor.month == 12:
             nxt = date(cursor.year + 1, 1, 1)
         else:
             nxt = date(cursor.year, cursor.month + 1, 1)
-        out.append((cursor, min(end, nxt - timedelta(days=1))))
+        out.append([cursor, min(end, nxt - timedelta(days=1))])
         cursor = nxt
-    return out
+
+    merged: list[list[date]] = []
+    for chunk in out:
+        span = (chunk[1] - chunk[0]).days + 1
+        if span < min_days and merged:
+            merged[-1][1] = chunk[1]      # 앞 조각에 붙인다
+        elif span < min_days and len(out) > 1:
+            out[1][0] = chunk[0]          # 첫 조각이면 뒤 조각에 넘긴다
+        else:
+            merged.append(chunk)
+    return [(a, b) for a, b in merged]
 
 
 def val_disk_rank(prepared, pipeline, family, window, horizon, threads,
