@@ -173,6 +173,17 @@ def build(
     data_dir = out_dir / "data"
 
     smart = canonicalize.smart_columns(canonical_path)
+    # 절제(ablation) 실험용. 특정 SMART 컬럼을 피처에서 통째로 뺀다.
+    # feature_hash 에 base 가 들어가므로 다른 레이어로 자동 분리된다.
+    drop = set(features_cfg.get("base", {}).get("exclude_raw") or [])
+    if drop:
+        kept = [c for c in smart if c not in drop]
+        missing = drop - set(smart)
+        if missing:
+            raise SystemExit(f"exclude_raw 에 없는 컬럼이 있다: {sorted(missing)}")
+        print(f"[features] exclude_raw: {sorted(drop)} 제거 "
+              f"({len(smart)} -> {len(kept)}개)")
+        smart = kept
     derived = resolve_derived_columns(features_cfg, smart)
     expressions = _expressions(features_cfg, derived)
     complexity = _complexity_expressions(features_cfg, derived)

@@ -43,9 +43,17 @@ DRIVE = "TOSHIBA_20MG07ACA14TA"
 SEED = 42
 RULE = "in_horizon"
 FAR_MARK = 0.01  # 표가 읽는 운영점
-# (범례, experiment, model, 색, 선굵기)
+# (범례, experiment, model, 색, 선굵기, 선모양)
+#
+# 튜닝 전후 두 곡선을 겹친다. 목적함수가 FPR 5% 이하만 최대화하므로,
+# 저오탐 구간에서는 제안 모델이 위에 있다가 그 위에서 교차하는 모양이
+# 나와야 한다. 그 교차가 곧 "그 위 구간은 미보장" 의 증거다.
+#
+# 범례는 표 1 의 Model 열 표기를 그대로 쓴다. 그림과 표에서 같은 모델이
+# 다른 이름으로 불리면 안 된다.
 ARMS = [
-    ("Proposed (tuned GRU)", "tos_proposed", "gru_tuned", "#2e6fb7", 2.0),
+    ("GRU",           "toslb_14_pauc", "gru_pauc",  "#8a8a8a", 1.6, "--"),
+    ("Optimized GRU", "tos_proposed",  "gru_tuned", "#2e6fb7", 2.0, "-"),
 ]
 # 관심 구간만 본다. pAUC@FAR<=5% 가 적분하는 범위와 같아서, 그림의 곡선
 # 아래 면적이 곧 그 지표가 된다.
@@ -115,12 +123,12 @@ def main() -> int:
         z = np.load(ROOT / "results" / "recall_far_curve.npz")
         # 범례 이름을 바꿔도 예전 npz 를 계속 쓸 수 있게, 키가 없으면
         # experiment/model 로 저장된 별칭을 찾는다.
-        alias = {"Proposed (tuned GRU)": "GRU (tuned)"}
-        for label, _, _, _, _ in ARMS:
+        alias = {"Optimized GRU": "GRU (tuned)", "GRU": "GRU (default)"}
+        for label, _, _, _, _, _ in ARMS:
             key = label if label in z.files else alias.get(label, label)
             results[label] = z[key]
         print(f"[curve] npz 재사용: {list(results)}", flush=True)
-    for label, experiment, model_name, _, _ in (
+    for label, experiment, model_name, _, _, _ in (
             [] if args.replot else ARMS):
         print(f"[curve] {label} ({experiment} / {model_name})", flush=True)
         months = disk_scores(experiment, model_name)
@@ -136,24 +144,25 @@ def main() -> int:
                             grid=GRID, **results)
 
     fig, ax = plt.subplots(figsize=(6.4, 4.4), dpi=200)
-    for label, _, _, color, lw in ARMS:
-        band = results[label]
-        # 선은 여섯 달의 평균, 띠는 달별 최소~최대. 달 간 폭이 모델 간 격차보다
-        # 큰지를 눈으로 바로 확인할 수 있게 한다.
-        ax.fill_between(GRID * 100, band.min(axis=0), band.max(axis=0),
-                        color=color, alpha=0.13, lw=0, zorder=2)
-        ax.plot(GRID * 100, band.mean(axis=0), color=color, lw=lw,
-                label=label, zorder=3)
+    for label, _, _, color, lw, ls in ARMS:
+        # 선은 여섯 달의 평균. 달별 최소~최대 띠는 그리지 않는다 — 달 간 폭이
+        # 두 곡선의 간격보다 훨씬 커서 띠를 얹으면 튜닝 전후 차이가 묻힌다.
+        # 달별 변동 수치는 본문에서 따로 보고한다.
+        ax.plot(GRID * 100, results[label].mean(axis=0), color=color, lw=lw,
+                ls=ls, label=label, zorder=3)
 
     ax.set_xlim(0, 5)
     ax.set_ylim(0, 1)
-    ax.set_xlabel("False Alarm Rate (%)")
+    ax.set_xlabel("False Positive Rate (%)")
     ax.set_ylabel("Recall")
     ax.grid(True, which="major", alpha=0.25, lw=0.6)
     # 네모 박스: 네 변을 모두 남긴다.
     for side in ("top", "right", "bottom", "left"):
         ax.spines[side].set_visible(True)
         ax.spines[side].set_linewidth(0.8)
+    # 곡선이 둘이라 범례가 필요하다. 곡선이 오른쪽 위로 붙으므로 아래가 빈다.
+    ax.legend(loc="lower right", frameon=True, framealpha=0.95,
+              edgecolor="0.8", fontsize=9)
     fig.tight_layout()
     out = ROOT / "results" / "recall_far_curve.png"
     fig.savefig(out)
