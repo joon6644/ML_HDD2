@@ -1,0 +1,26 @@
+# 9-3-6 GRU 탐색 trial 2 의 하이퍼파라미터 (val pAUC 0.8869).
+# 탐색이 고른 시행이 아니라, test 로 줄 세워 보기 위한 재현용이다.
+# scripts/score_trials_936.py 가 생성한다.
+
+name: gru_936_t2
+family: sequence
+class: hddpred.models.sequence.RNNModel
+params:
+  cell: gru
+  hidden_size: 32
+  num_layers: 2
+  dropout: 0.0716766437045232
+  bidirectional: false
+training:
+  epochs: 30
+  optimizer: adamw
+  loss: bce
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true
+  learning_rate: 0.0077506447963419
+  weight_decay: 0.0001222906594703
+  batch_size: 2048

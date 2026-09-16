@@ -1,0 +1,26 @@
+# mlp 탐색 1위 (val pAUC@FAR<=5% 0.8950, trial 11).
+# scripts/run_optuna_tabular.py 가 생성한다. 손으로 고치지 말 것.
+
+name: mlp_pauc_tuned_pool
+family: tabular
+class: hddpred.models.mlp.MLPModel
+params:
+  batch_norm: true
+  hidden_dims:
+  - 128
+  - 64
+  dropout: 0.49800564678624043
+training:
+  epochs: 30
+  loss: bce
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  scaling:
+    method: standard
+    clip_quantile:
+    - 0.001
+    - 0.999
+  learning_rate: 0.0005729249823734869
+  weight_decay: 4.019805854138923e-06
+  batch_size: 2048.0

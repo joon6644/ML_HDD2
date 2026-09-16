@@ -125,8 +125,15 @@ def main() -> int:
 
         vr, vf = score(model, val_parts)
         vs, vy = np.concatenate(vr), np.concatenate(vf).astype(int)
+        # 임곗값은 한 점이어야 하므로 창들을 모아 분위수를 잡는다 (의도된 것).
         thr = {t: float(np.quantile(vs[vy == 0], 1.0 - t)) for t in FAR_TARGETS}
-        val_pauc = roc_auc_score(vy, vs, max_fpr=PAUC_MAX_FPR)
+        # 지표는 창마다 산출한 뒤 평균한다. 풀링하지 않는다 — 논문이 보고하는
+        # 지표가 전부 월별 평균이다(3.4).
+        val_pauc = float(np.mean([
+            roc_auc_score(f.astype(int), r, max_fpr=PAUC_MAX_FPR)
+            for r, f in zip(vr, vf)
+            if 0 < int(np.asarray(f).astype(int).sum()) < len(f)
+        ]))
 
         monthly = {t: [] for t in FAR_TARGETS}
         far_m, auc_m, pauc_m = [], [], []

@@ -419,7 +419,22 @@ def draw(ig, val, columns, rng, drop_mask=False, suffix=""):
     cb.ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
     cb.ax.tick_params(labelsize=8)
     fig.tight_layout()
-    fig.savefig(ROOT / "results" / f"ig_heatmap{suffix}.png", bbox_inches="tight")
+    # 저장 범위를 직접 잡는다. bbox_inches="tight" 로 자르면 왼쪽 속성명이
+    # 색 막대보다 훨씬 넓어서 히트맵이 그림 오른쪽으로 치우친다. 본문에
+    # 가운데 정렬로 넣으면 그 치우침이 그대로 보이므로, 짧은 쪽에 여백을
+    # 채워 히트맵 가로 중심을 그림 중심에 맞춘다.
+    from matplotlib.transforms import Bbox
+    PAD = 0.05                                  # bbox_inches="tight" 기본 여백
+    fig.canvas.draw()
+    rend = fig.canvas.get_renderer()
+    tb = fig.get_tightbbox(rend)
+    ab = hx.get_window_extent(rend).transformed(fig.dpi_scale_trans.inverted())
+    x0, x1 = tb.x0 - PAD, tb.x1 + PAD
+    slack = (ab.x0 + ab.x1) - (x0 + x1)         # 양수면 오른쪽이 짧다
+    x1 += max(slack, 0.0)
+    x0 += min(slack, 0.0)
+    fig.savefig(ROOT / "results" / f"ig_heatmap{suffix}.png",
+                bbox_inches=Bbox([[x0, tb.y0 - PAD], [x1, tb.y1 + PAD]]))
     plt.close(fig)
 
     for name in ("ig_summary.png", "ig_time_importance.png", "ig_heatmap.png",

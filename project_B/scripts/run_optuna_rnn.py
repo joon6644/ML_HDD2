@@ -67,10 +67,13 @@ from hddpred.models.sequence import RNNModel  # noqa: E402
 from export_results import disk_rank, load_part, month_windows, rescale  # noqa: E402
 
 DRIVE = "TOSHIBA_20MG07ACA14TA"
-BASE_EXPERIMENT = "toslb_14_pauc"     # lookback 14 확정판 (pAUC 감시)
+# 분할·피처 설정을 가져올 실험. 모델 목록은 쓰지 않고 파이프라인만 읽는다.
+# --base-experiment 로 바꿀 수 있다 (예: 9-3-6 판은 tos936_nn).
+BASE_EXPERIMENT = "toslb_14_pauc"     # lookback 14 확정판 (pAUC 감시), 10-2-6
 SEED = 42
 PAUC_MAX_FPR = 0.05
-STUDY_NAME_FMT = "{cell}_tos_win10_pauc5_mon"
+# --tag 를 주면 study 이름과 산출물에 접미사가 붙어 기존 판을 덮지 않는다.
+STUDY_NAME_FMT = "{cell}_tos_win10_pauc5_mon{tag}"
 STUDY_DB = ROOT / "runs" / "optuna" / "rnn.db"
 RESULT_DIR = ROOT / "results"
 
@@ -163,25 +166,56 @@ def record_run(cell: str, study_name: str, frame, n_pruned: int, n_attempted: in
     return verdict
 
 
-def val_pauc(model, parts) -> tuple[float, float]:
-    """검증 구간의 부분 AUC와 FAR 1% 재현율.
+def val_pauc(model, parts, objective: str = "pauc",
+             aggregate: str = "mean") -> tuple[float, float]:
+    """검증 구간의 부분 AUC와 FAR 1% 재현율. **창마다 산출한 뒤 평균한다.**
+
+    풀링하지 않는다. 논문이 보고하는 지표가 전부 월별 산출 후 평균이므로
+    (3.4 평가 방법), 탐색 목적함수도 같은 방식이어야 탐색이 최대화하는 값과
+    최종 보고값이 어긋나지 않는다. 풀링하면 고장 디스크가 많은 창이 값을
+    지배한다는 문제도 같다.
 
     목적함수는 pAUC 하나지만 재현율도 같이 돌려준다. pAUC@FAR<=5% 는
     0~5% 전체 면적이라 5% 근처만 좋아져도 값이 오른다 — 논문이 헤드라인으로
     쓰는 FAR 1% 운영점과 어긋날 수 있어서, 시행마다 둘을 같이 남겨
     나중에 어긋남 자체를 관찰할 수 있게 한다. 선정에는 쓰지 않는다.
     """
-    ranks, flags = [], []
+    # aggregate="pool" 이면 창을 이어붙여 한 번에 잰다. 월별 평균은 달마다
+    # 고장 18~35대라 작은 달의 잡음이 그대로 들어오는 반면, 풀링은 표본이
+    # 커져 값이 안정적이다. 보고 지표는 3.4 대로 월별 평균을 유지하고,
+    # 여기서는 검증 후보를 고르는 기준만 고른다.
+    paucs, recalls, ranks, flags = [], [], [], []
     for part in parts:
         rank, has_window = disk_rank(model, part, "in_horizon")
-        ranks.append(rank.to_numpy())
-        flags.append(has_window.to_numpy())
-    score = np.concatenate(ranks)
-    actual = np.concatenate(flags).astype(int)
-    pauc = float(roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
-    thr = float(np.quantile(score[actual == 0], 0.99))
-    recall = float(((score >= thr) & (actual == 1)).sum() / max((actual == 1).sum(), 1))
-    return pauc, recall
+        score = rank.to_numpy()
+        actual = has_window.to_numpy().astype(int)
+        n_pos = int(actual.sum())
+        if n_pos == 0 or n_pos == len(actual):
+            continue                    # 한쪽 클래스뿐이면 AUC 가 정의되지 않는다
+        if aggregate == "pool":
+            ranks.append(score)
+            flags.append(actual)
+            continue
+        paucs.append(float(
+            roc_auc_score(actual, score)
+            if objective == "rocauc"
+            else roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR)))
+        thr = float(np.quantile(score[actual == 0], 0.99))
+        recalls.append(float(((score >= thr) & (actual == 1)).sum() / n_pos))
+    if aggregate == "pool":
+        if not ranks:
+            return float("nan"), float("nan")
+        score = np.concatenate(ranks)
+        actual = np.concatenate(flags)
+        pauc = float(roc_auc_score(actual, score)
+                     if objective == "rocauc"
+                     else roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
+        thr = float(np.quantile(score[actual == 0], 0.99))
+        rec = float(((score >= thr) & (actual == 1)).sum() / int(actual.sum()))
+        return pauc, rec
+    if not paucs:
+        return float("nan"), float("nan")
+    return float(np.mean(paucs)), float(np.mean(recalls))
 
 
 def main() -> int:
@@ -190,8 +224,19 @@ def main() -> int:
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--report", action="store_true")
     ap.add_argument("--cell", default="gru", choices=["gru", "lstm"])
+    ap.add_argument("--base-experiment", default=BASE_EXPERIMENT,
+                    help="분할·피처를 가져올 실험 (기본 10-2-6)")
+    ap.add_argument("--tag", default="",
+                    help="study·산출물 접미사. 다른 분할을 따로 남길 때 쓴다")
+    ap.add_argument("--val-aggregate", default="mean", choices=["mean", "pool"],
+                    help="검증 목적함수의 집계 방식. pool 은 창을 이어붙여 "
+                         "한 번에 잰다 (보고 지표는 3.4 대로 월별 평균 유지)")
+    ap.add_argument("--objective", default="pauc", choices=["pauc", "rocauc"],
+                    help="탐색 목적함수. rocauc 는 최적화 구간을 바꿔 보는 "
+                         "대조 실험용이며 조기종료 감시값도 함께 바뀐다")
     args = ap.parse_args()
-    study_name = STUDY_NAME_FMT.format(cell=args.cell)
+    tag = f"_{args.tag}" if args.tag else ""
+    study_name = STUDY_NAME_FMT.format(cell=args.cell, tag=tag)
 
     import optuna
 
@@ -213,7 +258,8 @@ def main() -> int:
     )
 
     if not args.report:
-        cfg = cfg_mod.load_yaml(paths.CONFIG_DIR / "experiments" / f"{BASE_EXPERIMENT}.yaml")
+        cfg = cfg_mod.load_yaml(
+            paths.CONFIG_DIR / "experiments" / f"{args.base_experiment}.yaml")
         pipeline = Pipeline.from_experiment(cfg)
         prepared = prepare_drive(DRIVE, pipeline)
         fold = sorted(prepared.folds, key=lambda f: f.fold)[0]
@@ -241,8 +287,11 @@ def main() -> int:
         print(f"  train {len(train):,} | val {len(val_full):,} "
               f"| val 월별 {len(val_months)}창 ({time.time() - started:.1f}s)", flush=True)
 
+        monitor = ("val_roc_auc" if args.objective == "rocauc" else "val_pauc")
+
         def objective(trial):
             params, training = suggest(trial, args.cell)
+            training["early_stopping_metric"] = monitor
             model = RNNModel(params, training, seed=SEED)
 
             def on_epoch(epoch, best):
@@ -253,7 +302,8 @@ def main() -> int:
             model.epoch_callback = on_epoch
             model.fit(train, val_full)
             model.epoch_callback = None
-            score, recall01 = val_pauc(model, val_months)
+            score, recall01 = val_pauc(model, val_months, args.objective,
+                                       args.val_aggregate)
             trial.set_user_attr("pauc", score)
             trial.set_user_attr("recall01", recall01)
             trial.set_user_attr("epochs", model.fit_info.get("epochs_run"))
@@ -287,7 +337,8 @@ def main() -> int:
         return 1
     frame = pd.DataFrame(rows).sort_values("pauc", ascending=False)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
-    frame.to_csv(RESULT_DIR / f"optuna_{args.cell}_trials.csv", index=False, encoding="utf-8-sig")
+    frame.to_csv(RESULT_DIR / f"optuna_{args.cell}{tag}_trials.csv",
+                 index=False, encoding="utf-8-sig")
 
     chosen = frame.iloc[0]
     print(f"\n--- val pAUC@FAR<={PAUC_MAX_FPR:.0%} 상위 8개 (seed {SEED}) ---")
@@ -297,9 +348,9 @@ def main() -> int:
     import yaml
 
     layers = int(chosen["num_layers"])
-    out = ROOT / "configs" / "models" / f"{args.cell}_tuned.yaml"
+    out = ROOT / "configs" / "models" / f"{args.cell}_tuned{tag}.yaml"
     cfg_out = {
-        "name": f"{args.cell}_tuned",
+        "name": f"{args.cell}_tuned{tag}",
         "family": "sequence",
         "class": "hddpred.models.sequence.RNNModel",
         "params": {
@@ -319,6 +370,7 @@ def main() -> int:
     header = (
         "# Optuna 로 고른 GRU 하이퍼파라미터.\n"
         f"#   탐색: 시드 {SEED} 의 val 부분 AUC(FAR <= {PAUC_MAX_FPR:.0%}) 최대화\n"
+        f"#   분할·피처: {args.base_experiment}\n"
         "#   val 점수는 월별 창으로 접는다 (test 와 같은 단위).\n"
         "#   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.\n"
         "#   scripts/run_optuna_rnn.py 가 생성한다. 직접 고치지 마라.\n\n"
@@ -326,7 +378,7 @@ def main() -> int:
     out.write_text(header + yaml.safe_dump(cfg_out, allow_unicode=True, sort_keys=False),
                    encoding="utf-8")
     print(f"\n[저장] {out}")
-    print(f"[저장] {RESULT_DIR / f'optuna_{args.cell}_trials.csv'}")
+    print(f"[저장] {RESULT_DIR / f'optuna_{args.cell}{tag}_trials.csv'}")
     return 0
 
 

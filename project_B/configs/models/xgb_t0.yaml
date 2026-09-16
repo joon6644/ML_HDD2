@@ -1,0 +1,22 @@
+# XGBoost 탐색 trial 0 (val pAUC 0.8882).
+# 탐색이 고른 시행이 아니라, test 로 줄 세워 보기 위한 재현용이다.
+# scripts/score_xgb_trials.py 가 생성한다.
+
+name: xgb_t0
+family: tabular
+class: hddpred.models.trees.XGBoostModel
+params:
+  objective: binary:logistic
+  eval_metric: aucpr
+  tree_method: hist
+  n_jobs: 8
+  n_estimators: 2000
+  learning_rate: 0.0646642271741456
+  max_depth: 8
+  min_child_weight: 8
+  subsample: 0.7724415914984484
+  colsample_bytree: 0.7118273996694524
+  reg_lambda: 0.3833332156156664
+training:
+  early_stopping_rounds: 100
+  auto_scale_pos_weight: false

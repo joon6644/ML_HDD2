@@ -1,0 +1,21 @@
+# xgboost 탐색 1위 (val pAUC@FAR<=5% 0.8941, trial 34).
+# scripts/run_optuna_tabular.py 가 생성한다. 손으로 고치지 말 것.
+
+name: xgboost_pauc_tuned
+family: tabular
+class: hddpred.models.trees.XGBoostModel
+params:
+  objective: binary:logistic
+  eval_metric: aucpr
+  tree_method: hist
+  n_jobs: 8
+  n_estimators: 2000
+  learning_rate: 0.021374136119487578
+  max_depth: 7
+  min_child_weight: 4
+  subsample: 0.6417087080951482
+  colsample_bytree: 0.971665653652669
+  reg_lambda: 0.37969271115336406
+training:
+  early_stopping_rounds: 100
+  auto_scale_pos_weight: false

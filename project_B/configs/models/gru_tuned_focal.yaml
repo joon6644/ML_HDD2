@@ -1,0 +1,27 @@
+# gru_tuned 와 하이퍼파라미터가 완전히 같고 손실만 focal 인 판.
+# 탐색된 설정과 불균형 처리를 함께 적용했을 때의 효과를 본다.
+
+name: gru_tuned_focal
+family: sequence
+class: hddpred.models.sequence.RNNModel
+params:
+  cell: gru
+  hidden_size: 32
+  num_layers: 1
+  dropout: 0.0
+  bidirectional: false
+training:
+  epochs: 30
+  optimizer: adamw
+  loss: focal
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true
+  learning_rate: 0.00454862420872194
+  weight_decay: 1.044195710380448e-06
+  batch_size: 2048
+  focal_gamma: 2.0
+  focal_alpha: 0.25

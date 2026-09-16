@@ -1,0 +1,472 @@
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+[optuna] 데이터 적재 (한 번만)
+    [sequence] lookback 14일을 못 채운 표본 1,151개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 278개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 101개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 138개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 | val 1,943,792 | val 월별 2창 (13.0s)
+[optuna] 완료 0개, 남은 시도 50개 (seed 42)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00278 val_pauc=0.87632
+      epoch 01 loss=0.00181 val_pauc=0.87967
+      epoch 02 loss=0.00173 val_pauc=0.88134
+      epoch 03 loss=0.00170 val_pauc=0.88239
+      epoch 04 loss=0.00166 val_pauc=0.88194
+      epoch 05 loss=0.00163 val_pauc=0.87980
+      epoch 06 loss=0.00161 val_pauc=0.88120
+      epoch 07 loss=0.00160 val_pauc=0.88195
+      epoch 08 loss=0.00158 val_pauc=0.87210
+      early stopping (patience 5)
+  [  1/50] pAUC=0.8943  (268s)  best=0.8943
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00306 val_pauc=0.87528
+      epoch 01 loss=0.00175 val_pauc=0.87472
+      epoch 02 loss=0.00168 val_pauc=0.87292
+      epoch 03 loss=0.00161 val_pauc=0.88069
+      epoch 04 loss=0.00155 val_pauc=0.87209
+      epoch 05 loss=0.00151 val_pauc=0.87656
+      epoch 06 loss=0.00146 val_pauc=0.87821
+      epoch 07 loss=0.00142 val_pauc=0.87069
+      epoch 08 loss=0.00137 val_pauc=0.86808
+      early stopping (patience 5)
+  [  2/50] pAUC=0.8918  (762s)  best=0.8943
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00198 val_pauc=0.87618
+      epoch 01 loss=0.00183 val_pauc=0.87579
+      epoch 02 loss=0.00175 val_pauc=0.87801
+      epoch 03 loss=0.00172 val_pauc=0.88046
+      epoch 04 loss=0.00170 val_pauc=0.87477
+      epoch 05 loss=0.00167 val_pauc=0.87485
+      epoch 06 loss=0.00166 val_pauc=0.87990
+      epoch 07 loss=0.00164 val_pauc=0.87650
+      epoch 08 loss=0.00163 val_pauc=0.87026
+      early stopping (patience 5)
+  [  3/50] pAUC=0.8933  (1313s)  best=0.8943
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00269 val_pauc=0.87498
+      epoch 01 loss=0.00178 val_pauc=0.87943
+      epoch 02 loss=0.00171 val_pauc=0.87922
+      epoch 03 loss=0.00168 val_pauc=0.88268
+      epoch 04 loss=0.00164 val_pauc=0.88086
+      epoch 05 loss=0.00162 val_pauc=0.87960
+      epoch 06 loss=0.00160 val_pauc=0.88045
+      epoch 07 loss=0.00159 val_pauc=0.88152
+      epoch 08 loss=0.00158 val_pauc=0.87559
+      early stopping (patience 5)
+  [  4/50] pAUC=0.8940  (646s)  best=0.8943
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00271 val_pauc=0.87976
+      epoch 01 loss=0.00171 val_pauc=0.88466
+      epoch 02 loss=0.00165 val_pauc=0.87921
+      epoch 03 loss=0.00161 val_pauc=0.87785
+      epoch 04 loss=0.00156 val_pauc=0.87914
+      epoch 05 loss=0.00153 val_pauc=0.87865
+      epoch 06 loss=0.00150 val_pauc=0.88344
+      early stopping (patience 5)
+  [  5/50] pAUC=0.8965  (498s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00201 val_pauc=0.87507
+      epoch 01 loss=0.00171 val_pauc=0.87961
+      epoch 02 loss=0.00161 val_pauc=0.88332
+      epoch 03 loss=0.00153 val_pauc=0.88110
+      epoch 04 loss=0.00147 val_pauc=0.87239
+      epoch 05 loss=0.00141 val_pauc=0.86361
+      epoch 06 loss=0.00135 val_pauc=0.87223
+      epoch 07 loss=0.00129 val_pauc=0.86085
+      early stopping (patience 5)
+  [  6/50] pAUC=0.8914  (384s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00194 val_pauc=0.87633
+      epoch 01 loss=0.00173 val_pauc=0.87771
+      epoch 02 loss=0.00168 val_pauc=0.88022
+      epoch 03 loss=0.00164 val_pauc=0.88132
+      epoch 04 loss=0.00160 val_pauc=0.87840
+      epoch 05 loss=0.00158 val_pauc=0.87825
+  [  7/50] pruned  (460s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00203 val_pauc=0.87242
+      epoch 01 loss=0.00178 val_pauc=0.87569
+      epoch 02 loss=0.00175 val_pauc=0.87478
+      epoch 03 loss=0.00171 val_pauc=0.87517
+      epoch 04 loss=0.00169 val_pauc=0.87451
+      epoch 05 loss=0.00167 val_pauc=0.87815
+  [  8/50] pruned  (839s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00195 val_pauc=0.87721
+      epoch 01 loss=0.00176 val_pauc=0.87893
+      epoch 02 loss=0.00171 val_pauc=0.87837
+      epoch 03 loss=0.00167 val_pauc=0.88250
+      epoch 04 loss=0.00165 val_pauc=0.87545
+      epoch 05 loss=0.00161 val_pauc=0.87591
+  [  9/50] pruned  (851s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00201 val_pauc=0.87208
+      epoch 01 loss=0.00175 val_pauc=0.87572
+      epoch 02 loss=0.00170 val_pauc=0.88033
+      epoch 03 loss=0.00167 val_pauc=0.87847
+      epoch 04 loss=0.00164 val_pauc=0.87264
+      epoch 05 loss=0.00161 val_pauc=0.87248
+  [ 10/50] pruned  (841s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00214 val_pauc=0.86994
+      epoch 01 loss=0.00175 val_pauc=0.87490
+      epoch 02 loss=0.00169 val_pauc=0.87118
+      epoch 03 loss=0.00164 val_pauc=0.88025
+      epoch 04 loss=0.00162 val_pauc=0.88233
+      epoch 05 loss=0.00158 val_pauc=0.87430
+  [ 11/50] pruned  (337s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00302 val_pauc=0.87573
+      epoch 01 loss=0.00182 val_pauc=0.87999
+      epoch 02 loss=0.00173 val_pauc=0.88283
+      epoch 03 loss=0.00170 val_pauc=0.88053
+      epoch 04 loss=0.00166 val_pauc=0.87801
+      epoch 05 loss=0.00163 val_pauc=0.87628
+  [ 12/50] pruned  (176s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00297 val_pauc=0.87691
+      epoch 01 loss=0.00182 val_pauc=0.88060
+      epoch 02 loss=0.00173 val_pauc=0.88222
+      epoch 03 loss=0.00170 val_pauc=0.88199
+      epoch 04 loss=0.00166 val_pauc=0.88092
+      epoch 05 loss=0.00163 val_pauc=0.87700
+  [ 13/50] pruned  (177s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00350 val_pauc=0.87205
+      epoch 01 loss=0.00175 val_pauc=0.87805
+      epoch 02 loss=0.00167 val_pauc=0.88221
+      epoch 03 loss=0.00161 val_pauc=0.87874
+      epoch 04 loss=0.00156 val_pauc=0.87962
+      epoch 05 loss=0.00151 val_pauc=0.88070
+  [ 14/50] pruned  (358s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00450 val_pauc=0.87951
+      epoch 01 loss=0.00185 val_pauc=0.88159
+      epoch 02 loss=0.00176 val_pauc=0.87932
+      epoch 03 loss=0.00173 val_pauc=0.88223
+      epoch 04 loss=0.00169 val_pauc=0.88009
+      epoch 05 loss=0.00168 val_pauc=0.88040
+  [ 15/50] pruned  (179s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00288 val_pauc=0.87461
+      epoch 01 loss=0.00172 val_pauc=0.87857
+      epoch 02 loss=0.00164 val_pauc=0.88189
+      epoch 03 loss=0.00158 val_pauc=0.87727
+      epoch 04 loss=0.00153 val_pauc=0.87515
+      epoch 05 loss=0.00149 val_pauc=0.87662
+  [ 16/50] pruned  (349s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00336 val_pauc=0.87531
+      epoch 01 loss=0.00171 val_pauc=0.87638
+      epoch 02 loss=0.00164 val_pauc=0.87517
+      epoch 03 loss=0.00159 val_pauc=0.88480
+      epoch 04 loss=0.00154 val_pauc=0.87841
+      epoch 05 loss=0.00150 val_pauc=0.88142
+      epoch 06 loss=0.00146 val_pauc=0.87879
+      epoch 07 loss=0.00143 val_pauc=0.88091
+      epoch 08 loss=0.00139 val_pauc=0.85506
+      early stopping (patience 5)
+  [ 17/50] pAUC=0.8950  (261s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00320 val_pauc=0.87761
+      epoch 01 loss=0.00171 val_pauc=0.88210
+      epoch 02 loss=0.00163 val_pauc=0.87915
+      epoch 03 loss=0.00158 val_pauc=0.88123
+      epoch 04 loss=0.00154 val_pauc=0.87864
+      epoch 05 loss=0.00150 val_pauc=0.87803
+  [ 18/50] pruned  (333s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00315 val_pauc=0.87499
+      epoch 01 loss=0.00171 val_pauc=0.88258
+      epoch 02 loss=0.00166 val_pauc=0.88186
+      epoch 03 loss=0.00160 val_pauc=0.87535
+      epoch 04 loss=0.00156 val_pauc=0.87948
+      epoch 05 loss=0.00152 val_pauc=0.87919
+  [ 19/50] pruned  (154s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00334 val_pauc=0.87500
+      epoch 01 loss=0.00164 val_pauc=0.88162
+      epoch 02 loss=0.00157 val_pauc=0.88705
+      epoch 03 loss=0.00151 val_pauc=0.88090
+      epoch 04 loss=0.00146 val_pauc=0.86291
+      epoch 05 loss=0.00141 val_pauc=0.87472
+      epoch 06 loss=0.00136 val_pauc=0.87643
+      epoch 07 loss=0.00131 val_pauc=0.87044
+      early stopping (patience 5)
+  [ 20/50] pAUC=0.8929  (403s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00688 val_pauc=0.87410
+      epoch 01 loss=0.00184 val_pauc=0.88267
+      epoch 02 loss=0.00173 val_pauc=0.88439
+      epoch 03 loss=0.00168 val_pauc=0.88615
+      epoch 04 loss=0.00164 val_pauc=0.88579
+      epoch 05 loss=0.00161 val_pauc=0.88246
+      epoch 06 loss=0.00158 val_pauc=0.88350
+      epoch 07 loss=0.00155 val_pauc=0.88045
+      epoch 08 loss=0.00153 val_pauc=0.87985
+      early stopping (patience 5)
+  [ 21/50] pAUC=0.8951  (236s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00720 val_pauc=0.87580
+      epoch 01 loss=0.00185 val_pauc=0.88235
+      epoch 02 loss=0.00173 val_pauc=0.88388
+      epoch 03 loss=0.00169 val_pauc=0.88457
+      epoch 04 loss=0.00166 val_pauc=0.88513
+      epoch 05 loss=0.00163 val_pauc=0.87962
+      epoch 06 loss=0.00160 val_pauc=0.88152
+  [ 22/50] pruned  (182s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00438 val_pauc=0.87636
+      epoch 01 loss=0.00178 val_pauc=0.88229
+      epoch 02 loss=0.00170 val_pauc=0.88024
+      epoch 03 loss=0.00165 val_pauc=0.88363
+      epoch 04 loss=0.00162 val_pauc=0.87842
+      epoch 05 loss=0.00160 val_pauc=0.88019
+  [ 23/50] pruned  (155s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00286 val_pauc=0.87961
+      epoch 01 loss=0.00172 val_pauc=0.88040
+      epoch 02 loss=0.00166 val_pauc=0.87706
+      epoch 03 loss=0.00161 val_pauc=0.87794
+      epoch 04 loss=0.00156 val_pauc=0.87281
+      epoch 05 loss=0.00152 val_pauc=0.87070
+  [ 24/50] pruned  (155s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00567 val_pauc=0.87379
+      epoch 01 loss=0.00179 val_pauc=0.88351
+      epoch 02 loss=0.00170 val_pauc=0.88322
+      epoch 03 loss=0.00165 val_pauc=0.88341
+      epoch 04 loss=0.00161 val_pauc=0.88347
+      epoch 05 loss=0.00158 val_pauc=0.88098
+  [ 25/50] pruned  (156s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00198 val_pauc=0.87742
+      epoch 01 loss=0.00167 val_pauc=0.87996
+      epoch 02 loss=0.00160 val_pauc=0.88258
+      epoch 03 loss=0.00152 val_pauc=0.87021
+      epoch 04 loss=0.00145 val_pauc=0.86158
+      epoch 05 loss=0.00138 val_pauc=0.87588
+  [ 26/50] pruned  (368s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00292 val_pauc=0.87755
+      epoch 01 loss=0.00174 val_pauc=0.87901
+      epoch 02 loss=0.00168 val_pauc=0.88204
+      epoch 03 loss=0.00164 val_pauc=0.88504
+      epoch 04 loss=0.00160 val_pauc=0.88001
+      epoch 05 loss=0.00158 val_pauc=0.88453
+      epoch 06 loss=0.00154 val_pauc=0.88591
+      epoch 07 loss=0.00152 val_pauc=0.88252
+      epoch 08 loss=0.00149 val_pauc=0.87048
+      epoch 09 loss=0.00147 val_pauc=0.87524
+      epoch 10 loss=0.00145 val_pauc=0.87837
+      epoch 11 loss=0.00143 val_pauc=0.85082
+      early stopping (patience 5)
+  [ 27/50] pAUC=0.8932  (313s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00281 val_pauc=0.88326
+      epoch 01 loss=0.00174 val_pauc=0.87940
+      epoch 02 loss=0.00168 val_pauc=0.88055
+      epoch 03 loss=0.00163 val_pauc=0.88395
+      epoch 04 loss=0.00159 val_pauc=0.86818
+      epoch 05 loss=0.00155 val_pauc=0.87292
+  [ 28/50] pruned  (156s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00360 val_pauc=0.87346
+      epoch 01 loss=0.00173 val_pauc=0.88046
+      epoch 02 loss=0.00166 val_pauc=0.88121
+      epoch 03 loss=0.00162 val_pauc=0.87808
+      epoch 04 loss=0.00159 val_pauc=0.87312
+      epoch 05 loss=0.00156 val_pauc=0.87778
+  [ 29/50] pruned  (592s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00196 val_pauc=0.87830
+      epoch 01 loss=0.00166 val_pauc=0.87861
+      epoch 02 loss=0.00157 val_pauc=0.88401
+      epoch 03 loss=0.00148 val_pauc=0.87438
+      epoch 04 loss=0.00139 val_pauc=0.84978
+      epoch 05 loss=0.00132 val_pauc=0.87610
+  [ 30/50] pruned  (369s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00297 val_pauc=0.87835
+      epoch 01 loss=0.00169 val_pauc=0.87883
+      epoch 02 loss=0.00161 val_pauc=0.88138
+      epoch 03 loss=0.00153 val_pauc=0.88255
+      epoch 04 loss=0.00146 val_pauc=0.87370
+      epoch 05 loss=0.00140 val_pauc=0.87286
+  [ 31/50] pruned  (198s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00269 val_pauc=0.87337
+      epoch 01 loss=0.00174 val_pauc=0.87990
+      epoch 02 loss=0.00166 val_pauc=0.88077
+      epoch 03 loss=0.00162 val_pauc=0.88212
+      epoch 04 loss=0.00157 val_pauc=0.87858
+      epoch 05 loss=0.00154 val_pauc=0.87446
+  [ 32/50] pruned  (160s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00209 val_pauc=0.87660
+      epoch 01 loss=0.00172 val_pauc=0.87698
+      epoch 02 loss=0.00164 val_pauc=0.87778
+      epoch 03 loss=0.00156 val_pauc=0.88369
+      epoch 04 loss=0.00150 val_pauc=0.86615
+      epoch 05 loss=0.00144 val_pauc=0.86054
+  [ 33/50] pruned  (465s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00269 val_pauc=0.87975
+      epoch 01 loss=0.00178 val_pauc=0.88159
+      epoch 02 loss=0.00171 val_pauc=0.88244
+      epoch 03 loss=0.00167 val_pauc=0.88190
+      epoch 04 loss=0.00164 val_pauc=0.87911
+      epoch 05 loss=0.00160 val_pauc=0.87671
+  [ 34/50] pruned  (161s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00284 val_pauc=0.87476
+      epoch 01 loss=0.00172 val_pauc=0.87726
+      epoch 02 loss=0.00165 val_pauc=0.88282
+      epoch 03 loss=0.00160 val_pauc=0.87671
+      epoch 04 loss=0.00155 val_pauc=0.86955
+      epoch 05 loss=0.00151 val_pauc=0.87339
+  [ 35/50] pruned  (156s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00215 val_pauc=0.87246
+      epoch 01 loss=0.00175 val_pauc=0.87521
+      epoch 02 loss=0.00169 val_pauc=0.87701
+      epoch 03 loss=0.00164 val_pauc=0.88008
+      epoch 04 loss=0.00158 val_pauc=0.87487
+      epoch 05 loss=0.00156 val_pauc=0.87733
+  [ 36/50] pruned  (357s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00234 val_pauc=0.88088
+      epoch 01 loss=0.00177 val_pauc=0.87819
+      epoch 02 loss=0.00174 val_pauc=0.87998
+      epoch 03 loss=0.00173 val_pauc=0.88146
+      epoch 04 loss=0.00171 val_pauc=0.88241
+      epoch 05 loss=0.00169 val_pauc=0.88038
+  [ 37/50] pruned  (607s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00225 val_pauc=0.87572
+      epoch 01 loss=0.00179 val_pauc=0.87896
+      epoch 02 loss=0.00172 val_pauc=0.88261
+      epoch 03 loss=0.00167 val_pauc=0.88384
+      epoch 04 loss=0.00163 val_pauc=0.88160
+      epoch 05 loss=0.00160 val_pauc=0.87989
+  [ 38/50] pruned  (378s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00410 val_pauc=0.87766
+      epoch 01 loss=0.00167 val_pauc=0.87807
+      epoch 02 loss=0.00160 val_pauc=0.88004
+      epoch 03 loss=0.00153 val_pauc=0.87604
+      epoch 04 loss=0.00147 val_pauc=0.86692
+      epoch 05 loss=0.00142 val_pauc=0.87195
+  [ 39/50] pruned  (153s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00210 val_pauc=0.87545
+      epoch 01 loss=0.00181 val_pauc=0.87273
+      epoch 02 loss=0.00178 val_pauc=0.87667
+      epoch 03 loss=0.00175 val_pauc=0.87450
+      epoch 04 loss=0.00173 val_pauc=0.87194
+      epoch 05 loss=0.00172 val_pauc=0.87014
+  [ 40/50] pruned  (746s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00225 val_pauc=0.87761
+      epoch 01 loss=0.00177 val_pauc=0.87947
+      epoch 02 loss=0.00170 val_pauc=0.88249
+      epoch 03 loss=0.00167 val_pauc=0.88371
+      epoch 04 loss=0.00163 val_pauc=0.88274
+      epoch 05 loss=0.00159 val_pauc=0.88144
+  [ 41/50] pruned  (314s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00241 val_pauc=0.87914
+      epoch 01 loss=0.00178 val_pauc=0.87789
+      epoch 02 loss=0.00174 val_pauc=0.88322
+      epoch 03 loss=0.00171 val_pauc=0.88388
+      epoch 04 loss=0.00168 val_pauc=0.87874
+      epoch 05 loss=0.00167 val_pauc=0.88016
+  [ 42/50] pruned  (313s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00282 val_pauc=0.87986
+      epoch 01 loss=0.00175 val_pauc=0.88230
+      epoch 02 loss=0.00167 val_pauc=0.88192
+      epoch 03 loss=0.00164 val_pauc=0.88542
+      epoch 04 loss=0.00161 val_pauc=0.88332
+      epoch 05 loss=0.00158 val_pauc=0.88054
+      epoch 06 loss=0.00157 val_pauc=0.84854
+  [ 43/50] pruned  (364s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00290 val_pauc=0.87963
+      epoch 01 loss=0.00182 val_pauc=0.87932
+      epoch 02 loss=0.00175 val_pauc=0.88120
+      epoch 03 loss=0.00172 val_pauc=0.88202
+      epoch 04 loss=0.00169 val_pauc=0.88126
+      epoch 05 loss=0.00168 val_pauc=0.87728
+  [ 44/50] pruned  (312s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00225 val_pauc=0.87766
+      epoch 01 loss=0.00168 val_pauc=0.87907
+      epoch 02 loss=0.00161 val_pauc=0.88227
+      epoch 03 loss=0.00155 val_pauc=0.86889
+      epoch 04 loss=0.00150 val_pauc=0.87069
+      epoch 05 loss=0.00145 val_pauc=0.87108
+  [ 45/50] pruned  (312s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00692 val_pauc=0.87573
+      epoch 01 loss=0.00186 val_pauc=0.87741
+      epoch 02 loss=0.00177 val_pauc=0.88173
+      epoch 03 loss=0.00172 val_pauc=0.88125
+      epoch 04 loss=0.00170 val_pauc=0.88078
+      epoch 05 loss=0.00168 val_pauc=0.88168
+  [ 46/50] pruned  (153s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00228 val_pauc=0.87760
+      epoch 01 loss=0.00170 val_pauc=0.87881
+      epoch 02 loss=0.00164 val_pauc=0.87808
+      epoch 03 loss=0.00158 val_pauc=0.88243
+      epoch 04 loss=0.00154 val_pauc=0.88066
+      epoch 05 loss=0.00150 val_pauc=0.87564
+  [ 47/50] pruned  (308s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00256 val_pauc=0.87960
+      epoch 01 loss=0.00169 val_pauc=0.88022
+      epoch 02 loss=0.00163 val_pauc=0.88518
+      epoch 03 loss=0.00157 val_pauc=0.87608
+      epoch 04 loss=0.00153 val_pauc=0.87396
+      epoch 05 loss=0.00149 val_pauc=0.87849
+      epoch 06 loss=0.00146 val_pauc=0.87971
+  [ 48/50] pruned  (717s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00217 val_pauc=0.87733
+      epoch 01 loss=0.00177 val_pauc=0.87826
+      epoch 02 loss=0.00170 val_pauc=0.87519
+      epoch 03 loss=0.00165 val_pauc=0.87573
+      epoch 04 loss=0.00161 val_pauc=0.87445
+      epoch 05 loss=0.00157 val_pauc=0.87842
+  [ 49/50] pruned  (198s)  best=0.8965
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00220 val_pauc=0.88036
+      epoch 01 loss=0.00169 val_pauc=0.88049
+      epoch 02 loss=0.00160 val_pauc=0.87954
+      epoch 03 loss=0.00152 val_pauc=0.87674
+      epoch 04 loss=0.00146 val_pauc=0.86736
+      epoch 05 loss=0.00140 val_pauc=0.86603
+  [ 50/50] pruned  (307s)  best=0.8965
+
+완료 10개 / 가지치기 40개
+
+--- val pAUC@FAR<=5% 상위 8개 (seed 42) ---
+ trial   pauc  epochs  receptive_field  width  num_levels  kernel_size  dropout  learning_rate  weight_decay  batch_size
+     4 0.8965       7               29     32           3            3   0.0983         0.0005        0.0019        1024
+    20 0.8951       9               57     32           3            5   0.1002         0.0001        0.0029        2048
+    16 0.8950       9               57     32           3            5   0.0606         0.0006        0.0023        2048
+     0 0.8943       9               57     64           3            5   0.4818         0.0006        0.0015        2048
+     3 0.8940       9               57     32           3            5   0.2851         0.0008        0.0090        1024
+     2 0.8933       9               57    256           3            5   0.3060         0.0017        0.0060         512
+    26 0.8932      12               57     32           3            5   0.1359         0.0010        0.0049        2048
+    19 0.8929       8               15     32           3            2   0.0045         0.0003        0.0001        1024
+
+선택: trial 4  pAUC 0.8965
+상위권이 구분되지 않는다 (상위 5개 폭 0.0025). 더 돌려도 같은 자리일 가능성이 높다.
+
+[저장] C:\Workspace\projects\26_2_COIN\project_B\configs\models\tcn_tuned.yaml
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\optuna_tcn_trials.csv

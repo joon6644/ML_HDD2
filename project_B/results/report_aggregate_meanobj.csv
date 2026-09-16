@@ -1,0 +1,6 @@
+﻿Model,report_mean,report_pool
+GRU,0.8764,0.8751
+LSTM,0.873,0.8731
+LightGBM,0.8653,0.8648
+XGBoost,0.861,0.8617
+MLP,0.8581,0.8577

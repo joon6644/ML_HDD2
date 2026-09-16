@@ -1,15 +1,5 @@
-# 파생변수 실험 — ASFD(차분 절대합) 7일
-#
-# toslb_14 (원본 SMART 16개) 와 features.base 축 하나만 다르다.
-# 도시바 10-2-6, GRU, lookback 14, min-max, 불균형 무처리, seed 42.
-#
-# 파생은 derived_on: critical 이라 canonical 에 있는 critical SMART
-# 7개에만 붙는다 (16 원본 + 7 파생 = 23채널).
-#
-# 사전 예상: RNN 은 lookback 안의 연속된 값을 이미 보므로 창 통계는
-#   원리적으로 재구성 가능한 정보다. 1일 차분에서 실제로 이득이 없었다
-#   (R@1% 0.765 -> 0.761, 학습 2.7배). 창이 lookback(14일)을 넘어서는
-#   경우에만 새 정보가 생길 여지가 있다.
+# 파생변수 구성 'asfd7'. scripts/run_feature_arms.py 가 생성한다.
+# 켠 것: features.base.asfd_windows
 
 experiment: tosfeat_asfd7
 uses:
@@ -22,7 +12,7 @@ uses:
 drives:
 - TOSHIBA_20MG07ACA14TA
 models:
-- configs/models/gru.yaml
+- configs/models/gru_pauc.yaml
 seeds:
 - 42
 folds:
@@ -60,6 +50,6 @@ overrides:
   - 7
   features.sequence.lookback_days: 14
   features.scaling.method: minmax
-  models.gru.training.loss: bce
-  models.gru.training.auto_pos_weight: false
+  models.gru_pauc.training.loss: bce
+  models.gru_pauc.training.auto_pos_weight: false
 output_root: ${project_root}/runs

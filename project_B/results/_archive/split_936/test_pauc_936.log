@@ -1,0 +1,77 @@
+[채점] RandomForest (tos936_trees / randomforest)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+[채점] XGBoost (tos936_trees / xgboost)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+[채점] LightGBM (tos936_trees / lightgbm)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+[채점] MLP (tos936_nn / mlp_pauc)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+[채점] LSTM (tos936_nn / lstm_pauc)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+[채점] GRU (tos936_nn / gru_pauc)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+[채점] TCN (tos936_nn / tcn_pauc)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+[채점] Optimized GRU (tos936_proposed / gru_tuned_936)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+
+=== 테스트 pAUC@FAR<=5% (달별 산출 후 평균) ===
+        model   pauc  pauc_sd  n_months  n_failed     m1     m2     m3     m4     m5     m6
+         LSTM 0.8756   0.0184         6       162 0.8925 0.8614 0.8939 0.8841 0.8475 0.8744
+Optimized GRU 0.8671   0.0205         6       162 0.8922 0.8638 0.8721 0.8666 0.8306 0.8772
+          GRU 0.8667   0.0148         6       162 0.8777 0.8512 0.8877 0.8677 0.8496 0.8664
+      XGBoost 0.8648   0.0164         6       162 0.8728 0.8582 0.8915 0.8555 0.8438 0.8669
+          MLP 0.8585   0.0145         6       162 0.8602 0.8581 0.8808 0.8513 0.8370 0.8637
+ RandomForest 0.8561   0.0260         6       162 0.8498 0.8628 0.8980 0.8485 0.8177 0.8598
+          TCN 0.8560   0.0192         6       162 0.8726 0.8615 0.8458 0.8664 0.8217 0.8677
+     LightGBM 0.8375   0.0271         6       162 0.8488 0.8267 0.8759 0.8332 0.7945 0.8460
+
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\test_pauc_936.csv

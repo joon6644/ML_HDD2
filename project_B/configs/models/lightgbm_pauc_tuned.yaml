@@ -1,0 +1,22 @@
+# lightgbm 탐색 1위 (val pAUC@FAR<=5% 0.8901, trial 21).
+# scripts/run_optuna_tabular.py 가 생성한다. 손으로 고치지 말 것.
+
+name: lightgbm_pauc_tuned
+family: tabular
+class: hddpred.models.trees.LightGBMModel
+params:
+  objective: binary
+  metric: average_precision
+  n_jobs: 8
+  verbose: -1
+  n_estimators: 3000
+  learning_rate: 0.014523341067863176
+  num_leaves: 34
+  min_child_samples: 18
+  subsample: 0.6789278613971973
+  colsample_bytree: 0.824536034281264
+  reg_lambda: 3.3246579999014005
+  subsample_freq: 1
+training:
+  early_stopping_rounds: 100
+  auto_scale_pos_weight: false

@@ -1,0 +1,29 @@
+# Optuna 로 고른 GRU 하이퍼파라미터.
+#   탐색: 시드 42 의 val 부분 AUC(FAR <= 5%) 최대화
+#   분할·피처: tos936_nn
+#   val 점수는 월별 창으로 접는다 (test 와 같은 단위).
+#   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.
+#   scripts/run_optuna_rnn.py 가 생성한다. 직접 고치지 마라.
+
+name: gru_tuned_936
+family: sequence
+class: hddpred.models.sequence.RNNModel
+params:
+  cell: gru
+  hidden_size: 256
+  num_layers: 1
+  dropout: 0.0
+  bidirectional: false
+training:
+  epochs: 30
+  optimizer: adamw
+  loss: bce
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true
+  learning_rate: 0.004741216804249708
+  weight_decay: 2.4232243900608937e-06
+  batch_size: 2048

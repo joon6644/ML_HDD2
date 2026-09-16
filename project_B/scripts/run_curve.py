@@ -51,10 +51,25 @@ FAR_MARK = 0.01  # 표가 읽는 운영점
 #
 # 범례는 표 1 의 Model 열 표기를 그대로 쓴다. 그림과 표에서 같은 모델이
 # 다른 이름으로 불리면 안 된다.
-ARMS = [
-    ("GRU",           "toslb_14_pauc", "gru_pauc",  "#8a8a8a", 1.6, "--"),
-    ("Optimized GRU", "tos_proposed",  "gru_tuned", "#2e6fb7", 2.0, "-"),
-]
+# --arms 로 고른다. TCN 판은 GRU 와 독립된 트랙이라 산출물 파일명에
+# _tcn 접미사를 붙여 서로 덮어쓰지 않게 한다.
+ARM_SETS = {
+    "gru": [
+        ("GRU",           "toslb_14_pauc", "gru_pauc",  "#8a8a8a", 1.6, "--"),
+        ("Optimized GRU", "tos_proposed",  "gru_tuned", "#2e6fb7", 2.0, "-"),
+    ],
+    # 검증 풀링 목적함수로 탐색한 판 (논문 확정본).
+    "pool": [
+        ("GRU",           "toslb_14_pauc", "gru_pauc",       "#8a8a8a", 1.6, "--"),
+        ("Optimized GRU", "tos_pool_gru",  "gru_tuned_pool", "#2e6fb7", 2.0, "-"),
+    ],
+    "tcn": [
+        ("TCN",           "tcnlb_14_pauc",    "tcn_pauc",  "#8a8a8a", 1.6, "--"),
+        ("Optimized TCN", "tos_proposed_tcn", "tcn_tuned", "#2e6fb7", 2.0, "-"),
+    ],
+}
+SUFFIX = {"gru": "_mean", "pool": "", "tcn": "_tcn"}
+ARMS = ARM_SETS["gru"]        # main 에서 --arms 에 맞춰 다시 묶는다
 # 관심 구간만 본다. pAUC@FAR<=5% 가 적분하는 범위와 같아서, 그림의 곡선
 # 아래 면적이 곧 그 지표가 된다.
 GRID = np.linspace(2e-4, 0.05, 300)   # 0.02% ~ 5%
@@ -115,12 +130,19 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="FAR-재현율 곡선")
     ap.add_argument("--replot", action="store_true",
-                    help="results/recall_far_curve.npz 로 그림만 다시 그린다")
+                    help="저장된 npz 로 그림만 다시 그린다")
+    ap.add_argument("--arms", choices=sorted(ARM_SETS), default="gru",
+                    help="어느 트랙의 곡선을 그릴지 (기본 gru)")
     args = ap.parse_args()
+
+    global ARMS
+    ARMS = ARM_SETS[args.arms]
+    suffix = SUFFIX[args.arms]
+    npz_path = ROOT / "results" / f"recall_far_curve{suffix}.npz"
 
     results = {}
     if args.replot:
-        z = np.load(ROOT / "results" / "recall_far_curve.npz")
+        z = np.load(npz_path)
         # 범례 이름을 바꿔도 예전 npz 를 계속 쓸 수 있게, 키가 없으면
         # experiment/model 로 저장된 별칭을 찾는다.
         alias = {"Optimized GRU": "GRU (tuned)", "GRU": "GRU (default)"}
@@ -140,8 +162,7 @@ def main() -> int:
               f" | FAR {FAR_MARK:.0%} 에서 Recall {at:.3f}", flush=True)
 
     if not args.replot:
-        np.savez_compressed(ROOT / "results" / "recall_far_curve.npz",
-                            grid=GRID, **results)
+        np.savez_compressed(npz_path, grid=GRID, **results)
 
     fig, ax = plt.subplots(figsize=(6.4, 4.4), dpi=200)
     for label, _, _, color, lw, ls in ARMS:
@@ -151,8 +172,19 @@ def main() -> int:
         ax.plot(GRID * 100, results[label].mean(axis=0), color=color, lw=lw,
                 ls=ls, label=label, zorder=3)
 
-    ax.set_xlim(0, 5)
-    ax.set_ylim(0, 1)
+    # x 축은 로그. 두 곡선이 갈라지는 구간(0.2~2%)이 선형 축에서는 왼쪽
+    # 30% 안에 눌려 겹쳐 보인다. 왼쪽 끝 0.1% 미만은 자른다 — 월 정상
+    # 37,200대 기준 오탐 7~8대라 재현율 눈금이 거칠고 달마다 요동친다.
+    # 대신 곡선 아래 면적이 더는 pAUC 와 일치하지 않으므로, 캡션과 본문에
+    # "적분 범위" 가 아니라 "오탐률 수준에 따른 탐지 성능" 으로 쓴다.
+    from matplotlib.ticker import NullFormatter, NullLocator, FixedLocator, FixedFormatter
+    ax.set_xscale("log")
+    ax.set_xlim(0.1, 5)
+    ax.xaxis.set_minor_locator(NullLocator())
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.xaxis.set_major_locator(FixedLocator([0.1, 0.2, 0.5, 1, 2, 5]))
+    ax.xaxis.set_major_formatter(FixedFormatter(["0.1", "0.2", "0.5", "1", "2", "5"]))
+    ax.set_ylim(0.2, 0.9)
     ax.set_xlabel("False Positive Rate (%)")
     ax.set_ylabel("Recall")
     ax.grid(True, which="major", alpha=0.25, lw=0.6)
@@ -164,7 +196,7 @@ def main() -> int:
     ax.legend(loc="lower right", frameon=True, framealpha=0.95,
               edgecolor="0.8", fontsize=9)
     fig.tight_layout()
-    out = ROOT / "results" / "recall_far_curve.png"
+    out = ROOT / "results" / f"recall_far_curve{suffix}.png"
     fig.savefig(out)
     plt.close(fig)
     print(f"\n[저장] {out}")

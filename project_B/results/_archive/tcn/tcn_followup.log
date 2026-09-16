@@ -1,0 +1,503 @@
+[계획] 실험 6개: tos_proposed_tcn, tcnlb_7_pauc, tcnlb_14_pauc, tcnlb_21_pauc, tcnlb_30_pauc, tcnlb_60_pauc + 그림 2종
+
+==================================================================
+[1/6] tos_proposed_tcn
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tos_proposed_tcn.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_tuned | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,151개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 278개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (6.7s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00271 val_pauc=0.87976
+      epoch 01 loss=0.00171 val_pauc=0.88466
+      epoch 02 loss=0.00165 val_pauc=0.87921
+      epoch 03 loss=0.00161 val_pauc=0.87785
+      epoch 04 loss=0.00156 val_pauc=0.87914
+      epoch 05 loss=0.00153 val_pauc=0.87865
+      epoch 06 loss=0.00150 val_pauc=0.88344
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0770 P 0.030 R 0.725 | disk: P 0.062 R 0.759 FAR 0.0089 (fit 365.4s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tos_proposed_tcn
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (598s)
+
+$ scripts/export_results.py tos_proposed_tcn --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 101개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 138개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_tuned | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tos_proposed_tcn_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tos_proposed_tcn_summary.csv  (4 행)
+  → OK  (18s)
+
+$ scripts/export_results.py tos_proposed_tcn --threshold-source month_quantile --out results/tos_proposed_tcn_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_tuned | seed 42 채점 완료
+
+[원자료] results\tos_proposed_tcn_oracle_long.csv  (24 행)
+[요약]   results\tos_proposed_tcn_oracle_summary.csv  (4 행)
+  → OK  (14s)
+
+==================================================================
+[2/6] tcnlb_7_pauc
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tcnlb_7_pauc.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 7일을 못 채운 표본 574개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 155개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 60개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (6.0s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00197 val_pauc=0.87526
+      epoch 01 loss=0.00176 val_pauc=0.87218
+      epoch 02 loss=0.00172 val_pauc=0.87881
+      epoch 03 loss=0.00168 val_pauc=0.88087
+      epoch 04 loss=0.00166 val_pauc=0.87791
+      epoch 05 loss=0.00163 val_pauc=0.87508
+      epoch 06 loss=0.00160 val_pauc=0.87839
+      epoch 07 loss=0.00159 val_pauc=0.87973
+      epoch 08 loss=0.00158 val_pauc=0.87712
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0802 P 0.043 R 0.656 | disk: P 0.076 R 0.655 FAR 0.0062 (fit 720.1s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tcnlb_7_pauc
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (953s)
+
+$ scripts/export_results.py tcnlb_7_pauc --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 7일을 못 채운 표본 52개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 92개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 60개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 71개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 1,097개 (0.14%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 227개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 195개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 573개 (0.07%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_7_pauc_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_7_pauc_summary.csv  (4 행)
+  → OK  (21s)
+
+$ scripts/export_results.py tcnlb_7_pauc --threshold-source month_quantile --out results/tcnlb_7_pauc_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 7일을 못 채운 표본 60개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 71개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 1,097개 (0.14%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 227개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 195개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 7일을 못 채운 표본 573개 (0.07%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] results\tcnlb_7_pauc_oracle_long.csv  (24 행)
+[요약]   results\tcnlb_7_pauc_oracle_summary.csv  (4 행)
+  → OK  (16s)
+
+==================================================================
+[3/6] tcnlb_14_pauc
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tcnlb_14_pauc.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,151개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 278개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (6.3s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00205 val_pauc=0.87912
+      epoch 01 loss=0.00172 val_pauc=0.88180
+      epoch 02 loss=0.00166 val_pauc=0.88045
+      epoch 03 loss=0.00162 val_pauc=0.87989
+      epoch 04 loss=0.00158 val_pauc=0.87890
+      epoch 05 loss=0.00155 val_pauc=0.87704
+      epoch 06 loss=0.00152 val_pauc=0.88180
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0700 P 0.030 R 0.739 | disk: P 0.060 R 0.690 FAR 0.0084 (fit 716.8s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tcnlb_14_pauc
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (951s)
+
+$ scripts/export_results.py tcnlb_14_pauc --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 101개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 138개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_14_pauc_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_14_pauc_summary.csv  (4 행)
+  → OK  (25s)
+
+$ scripts/export_results.py tcnlb_14_pauc --threshold-source month_quantile --out results/tcnlb_14_pauc_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] results\tcnlb_14_pauc_oracle_long.csv  (24 행)
+[요약]   results\tcnlb_14_pauc_oracle_summary.csv  (4 행)
+  → OK  (19s)
+
+==================================================================
+[4/6] tcnlb_21_pauc
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tcnlb_21_pauc.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 21일을 못 채운 표본 1,686개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 375개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 214개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (6.6s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00206 val_pauc=0.87649
+      epoch 01 loss=0.00169 val_pauc=0.88080
+      epoch 02 loss=0.00163 val_pauc=0.88138
+      epoch 03 loss=0.00157 val_pauc=0.87731
+      epoch 04 loss=0.00154 val_pauc=0.87502
+      epoch 05 loss=0.00149 val_pauc=0.87205
+      epoch 06 loss=0.00145 val_pauc=0.87877
+      epoch 07 loss=0.00140 val_pauc=0.87149
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0503 P 0.030 R 0.766 | disk: P 0.061 R 0.793 FAR 0.0094 (fit 834.0s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tcnlb_21_pauc
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (1066s)
+
+$ scripts/export_results.py tcnlb_21_pauc --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 21일을 못 채운 표본 165개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 160개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 214개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 287개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 3,134개 (0.40%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 458개 (0.06%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 507개 (0.08%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 1,951개 (0.25%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_21_pauc_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_21_pauc_summary.csv  (4 행)
+  → OK  (26s)
+
+$ scripts/export_results.py tcnlb_21_pauc --threshold-source month_quantile --out results/tcnlb_21_pauc_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 21일을 못 채운 표본 214개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 287개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 3,134개 (0.40%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 458개 (0.06%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 507개 (0.08%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 21일을 못 채운 표본 1,951개 (0.25%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] results\tcnlb_21_pauc_oracle_long.csv  (24 행)
+[요약]   results\tcnlb_21_pauc_oracle_summary.csv  (4 행)
+  → OK  (20s)
+
+==================================================================
+[5/6] tcnlb_30_pauc
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tcnlb_30_pauc.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 30일을 못 채운 표본 2,863개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 494개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 336개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (7.0s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00194 val_pauc=0.88027
+      epoch 01 loss=0.00168 val_pauc=0.88332
+      epoch 02 loss=0.00162 val_pauc=0.88345
+      epoch 03 loss=0.00156 val_pauc=0.88105
+      epoch 04 loss=0.00151 val_pauc=0.87857
+      epoch 05 loss=0.00145 val_pauc=0.88459
+      epoch 06 loss=0.00141 val_pauc=0.87401
+      epoch 07 loss=0.00137 val_pauc=0.88167
+      epoch 08 loss=0.00132 val_pauc=0.86696
+      epoch 09 loss=0.00129 val_pauc=0.83540
+      epoch 10 loss=0.00125 val_pauc=0.83260
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0542 P 0.031 R 0.739 | disk: P 0.068 R 0.759 FAR 0.0081 (fit 1389.0s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tcnlb_30_pauc
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (1626s)
+
+$ scripts/export_results.py tcnlb_30_pauc --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 30일을 못 채운 표본 234개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 197개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 336개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 366개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 3,222개 (0.41%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 942개 (0.12%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 755개 (0.11%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 2,555개 (0.33%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_30_pauc_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_30_pauc_summary.csv  (4 행)
+  → OK  (31s)
+
+$ scripts/export_results.py tcnlb_30_pauc --threshold-source month_quantile --out results/tcnlb_30_pauc_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 30일을 못 채운 표본 336개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 366개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 3,222개 (0.41%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 942개 (0.12%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 755개 (0.11%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 30일을 못 채운 표본 2,555개 (0.33%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] results\tcnlb_30_pauc_oracle_long.csv  (24 행)
+[요약]   results\tcnlb_30_pauc_oracle_summary.csv  (4 행)
+  → OK  (23s)
+
+==================================================================
+[6/6] tcnlb_60_pauc
+==================================================================
+
+$ scripts/run_experiment.py configs/experiments/tcnlb_60_pauc.yaml
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.7 GB (11,022,899행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 60일을 못 채운 표본 8,672개 (0.08%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 822개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 440개 (0.06%) 를 복제 패딩 + mask 채널로 채운다.
+  train 11,022,899 (양성 0.0333%) | val 1,943,792 | test 783,916 (8.6s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00196 val_pauc=0.88303
+      epoch 01 loss=0.00167 val_pauc=0.88479
+      epoch 02 loss=0.00159 val_pauc=0.88658
+      epoch 03 loss=0.00152 val_pauc=0.88083
+      epoch 04 loss=0.00146 val_pauc=0.85813
+      epoch 05 loss=0.00141 val_pauc=0.86512
+      epoch 06 loss=0.00134 val_pauc=0.87759
+      epoch 07 loss=0.00130 val_pauc=0.86668
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0435 P 0.029 R 0.693 | disk: P 0.066 R 0.793 FAR 0.0087 (fit 988.4s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tcnlb_60_pauc
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+  → OK  (1225s)
+
+$ scripts/export_results.py tcnlb_60_pauc --threshold-source val_quantile
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 60일을 못 채운 표본 348개 (0.04%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 340개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 440개 (0.06%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 524개 (0.07%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 3,469개 (0.44%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 4,383개 (0.56%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 1,478개 (0.22%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 3,227개 (0.41%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_60_pauc_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tcnlb_60_pauc_summary.csv  (4 행)
+  → OK  (39s)
+
+$ scripts/export_results.py tcnlb_60_pauc --threshold-source month_quantile --out results/tcnlb_60_pauc_oracle
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 60일을 못 채운 표본 440개 (0.06%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 524개 (0.07%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 3,469개 (0.44%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 4,383개 (0.56%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 1,478개 (0.22%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 60일을 못 채운 표본 3,227개 (0.41%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 채점 완료
+
+[원자료] results\tcnlb_60_pauc_oracle_long.csv  (24 행)
+[요약]   results\tcnlb_60_pauc_oracle_summary.csv  (4 행)
+  → OK  (30s)
+
+==================================================================
+[그림 1] 부분 ROC 곡선
+==================================================================
+
+$ scripts/run_curve.py --arms tcn
+[curve] TCN (tcnlb_14_pauc / tcn_pauc)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  고장 162대 / 정상 223,444대 (월 6창) | FAR 1% 에서 Recall 0.708
+[curve] Optimized TCN (tos_proposed_tcn / tcn_tuned)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  고장 162대 / 정상 223,444대 (월 6창) | FAR 1% 에서 Recall 0.714
+
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\recall_far_curve_tcn.png
+  → OK  (32s)
+
+==================================================================
+[그림 2] IG 히트맵
+==================================================================
+
+$ scripts/run_ig.py --experiment tos_proposed_tcn --model tcn_tuned --baseline train_mean --positives-only
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=008ee120b9
+    [sequence] lookback 14일을 못 채운 표본 1,151개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+[ig] 기준점 = 학습 창 50,000개의 성분별 평균 (14, 17), 범위 0.002~1.000
+[ig] test 구간 적재
+C:\Workspace\projects\26_2_COIN\project_A\venv\Lib\site-packages\torch\autograd\graph.py:869: UserWarning: Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context... (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\cuda\CublasHandlePool.cpp:335.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  표본 1,344개, 입력 (14일 x 17채널)
+  완결성 오차 |sum(IG) - (F(x)-F(0))| : 중앙값 7.735e-02, 상대 1.39%
+
+--- 변수별 중요도 상위 10 ---
+  197             0.341956
+  196             0.104938
+  9               0.063880
+  226             0.055399
+  5               0.053156
+  198             0.052853
+  222             0.042666
+  3               0.034929
+  193             0.028295
+  194             0.024813
+
+--- 시점별 중요도 (예측일로부터) ---
+  13일 전  0.007896
+  12일 전  0.028856
+  11일 전  0.029971
+  10일 전  0.034511
+   9일 전  0.030625
+   8일 전  0.052075
+   7일 전  0.038445
+   6일 전  0.055119
+   5일 전  0.042420
+   4일 전  0.070935
+   3일 전  0.065189
+   2일 전  0.095172
+   1일 전  0.063805
+   0일 전  0.124818
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\ig_summary.png
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\ig_time_importance.png
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\ig_heatmap.png
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\ig_importance.csv
+[저장] C:\Workspace\projects\26_2_COIN\project_B\results\ig_time_importance.csv
+  → OK  (110s)
+
+[완료] 8/8 성공, 총 1.9시간

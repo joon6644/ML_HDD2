@@ -97,26 +97,35 @@ def evaluate(experiment: str, model_name: str) -> dict:
     val_pauc = float(roc_auc_score(val_failed.astype(int), val_score,
                                    max_fpr=PAUC_MAX_FPR))
 
-    # --- test: 모델 하나로 세 달을 각각 예측해 통합한다 ---
-    scores, failed = [], []
+    # --- test: 모델 하나로 달마다 예측하고, 지표는 달별 산출 후 평균한다 ---
+    # 풀링하지 않는다. 논문이 보고하는 지표가 전부 월별 산출 후 평균이고
+    # (3.4 평가 방법), 달마다 고장 디스크 수가 다르므로 풀링하면 큰 달이
+    # 값을 지배한다.
+    recalls, fars, aucs, paucs = [], [], [], []
+    n_failed = n_healthy = 0
     for fold in folds:
         start, end = fold.window("test")
         rank, has_window = disk_rank(model, part_of("test", start, end), RULE)
-        scores.append(rank.to_numpy())
-        failed.append(has_window.to_numpy())
-    score = np.concatenate(scores)
-    is_failed = np.concatenate(failed).astype(bool)
+        s = rank.to_numpy()
+        f = has_window.to_numpy().astype(bool)
+        n_failed += int(f.sum())
+        n_healthy += int((~f).sum())
+        if f.sum() == 0 or (~f).sum() == 0:
+            continue                    # 한쪽 클래스뿐이면 AUC 가 정의되지 않는다
+        alarm = s >= threshold
+        recalls.append(float((alarm & f).sum() / f.sum()))
+        fars.append(float((alarm & ~f).sum() / (~f).sum()))
+        aucs.append(float(roc_auc_score(f.astype(int), s)))
+        paucs.append(float(roc_auc_score(f.astype(int), s, max_fpr=PAUC_MAX_FPR)))
 
-    alarm = score >= threshold
     return {
         "val_pAUC": val_pauc,
-        "recall": float((alarm & is_failed).sum() / is_failed.sum()),
-        "far": float((alarm & ~is_failed).sum() / (~is_failed).sum()),
-        "roc_auc": float(roc_auc_score(is_failed.astype(int), score)),
-        "pauc": float(roc_auc_score(is_failed.astype(int), score,
-                                    max_fpr=PAUC_MAX_FPR)),
-        "n_failed": int(is_failed.sum()),
-        "n_healthy": int((~is_failed).sum()),
+        "recall": float(np.mean(recalls)),
+        "far": float(np.mean(fars)),
+        "roc_auc": float(np.mean(aucs)),
+        "pauc": float(np.mean(paucs)),
+        "n_failed": n_failed,
+        "n_healthy": n_healthy,
     }
 
 

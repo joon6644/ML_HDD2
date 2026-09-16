@@ -430,6 +430,19 @@ class TorchSequenceModel(BaseModel):
             return float("nan")
         return float(roc_auc_score(y_true, score, max_fpr=max_fpr))
 
+    @staticmethod
+    def _roc_auc(y_true: np.ndarray, score: np.ndarray) -> float:
+        """ROC 곡선 전체 아래 면적.
+
+        목적함수를 pAUC 가 아니라 전체 AUC 로 두는 대조 실험용이다. 조기
+        종료 감시값도 목적함수와 같아야 두 판의 조건이 대칭이 된다.
+        """
+        from sklearn.metrics import roc_auc_score
+
+        if y_true.max() == y_true.min():
+            return float("nan")
+        return float(roc_auc_score(y_true, score))
+
     # -- 인터페이스 ---------------------------------------------------------
     def fit(self, train, val) -> dict:
         torch.manual_seed(self.seed)
@@ -471,10 +484,12 @@ class TorchSequenceModel(BaseModel):
             monitor_fn = self._pr_auc
         elif monitor == "val_pauc":
             monitor_fn = self._pauc
+        elif monitor == "val_roc_auc":
+            monitor_fn = self._roc_auc
         else:
             raise ValueError(
                 f"알 수 없는 early_stopping_metric: {monitor!r} "
-                "(val_pr_auc | val_pauc)"
+                "(val_pr_auc | val_pauc | val_roc_auc)"
             )
 
         best_score, best_epoch, best_state, waited = -np.inf, -1, None, 0

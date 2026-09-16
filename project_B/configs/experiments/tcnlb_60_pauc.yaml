@@ -1,0 +1,66 @@
+# 입력 윈도우 민감도 (TCN) — 레벨 수를 수용 영역 규칙에 맞춘 판.
+#
+# toslb_60_pauc (GRU) 와 모델만 다르다. TCN 은 수용 영역이
+#   RF = 1 + 2(k-1)(2^n - 1)
+# 로 정해지므로 lookback 을 바꾸면 레벨 수 n 도 따라 바꿔야 창을 덮는다.
+# 레벨 수를 고정하지 않는 이유: 그 길이로 실제 쓴다면 구조도 그 길이에
+# 맞춰 잡는다. 따라서 이 판이 '커널 크기를 적절히 잡았다는 전제에서 창
+# 길이를 바꿨을 때 기대되는 성능' 이다.
+#
+# 대신 용량(파라미터 수)이 길이와 함께 움직이므로, GRU 판처럼
+# '길이만 바꾸고 나머지 동일' 이라고는 쓸 수 없다.
+# lookback 60일, 레벨 4 -> 수용 영역 61
+
+experiment: tcnlb_60_pauc
+uses:
+  data: configs/data.yaml
+  preprocessing: configs/preprocessing.yaml
+  labeling: configs/labeling.yaml
+  split: configs/split.yaml
+  features: configs/features.yaml
+  evaluation: configs/evaluation.yaml
+drives:
+- TOSHIBA_20MG07ACA14TA
+models:
+- configs/models/tcn_pauc.yaml
+seeds:
+- 42
+folds:
+- 0
+warm_start: false
+overrides:
+  labeling.horizon_days: 10
+  labeling.censoring_scope: window
+  labeling.min_history_days: 30
+  features.train_sampling.strategy: none
+  evaluation.disk_level.rule: in_horizon
+  evaluation.disk_level.window_days: null
+  evaluation.threshold.policy: fixed_disk_far
+  evaluation.threshold.fixed_disk_far: 0.01
+  split.protocol: forward_chaining
+  split.test_months: 1
+  split.val_months: 2
+  split.n_folds: 6
+  split.embargo_days: 0
+  split.allow_label_overlap: true
+  split.exclude_incomplete_tail: false
+  split.min_train_months: 6
+  split.min_train_failures: 1
+  split.min_val_failures: 1
+  split.min_test_failures: 1
+  split.train_window: rolling
+  split.train_months: 10
+  features.base.include_age: false
+  features.base.diff_lags: []
+  features.base.rolling_windows: []
+  features.base.rolling_stats: []
+  features.base.include_since_start: false
+  features.base.cid_windows: []
+  features.base.asfd_windows: []
+  features.sequence.lookback_days: 60
+  features.scaling.method: minmax
+  models.tcn_pauc.training.loss: bce
+  models.tcn_pauc.training.auto_pos_weight: false
+  models.tcn_pauc.params.channels: [64, 64, 64, 64]
+  models.tcn_pauc.params.kernel_size: 3
+output_root: ${project_root}/runs

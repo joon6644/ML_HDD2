@@ -1,0 +1,29 @@
+# gru_pauc 와 하이퍼파라미터가 완전히 같고 손실만 focal 인 판.
+# 표 1 의 GRU 행은 실험 설정에서 loss 를 bce 로 덮어 학습했다.
+# 이 판은 그 override 를 걸지 않아 focal(gamma 2.0, alpha 0.25)이 그대로 쓰인다.
+# 불균형 처리의 효과만 분리해 보기 위한 대조군이다.
+
+name: gru_focal
+family: sequence
+class: hddpred.models.sequence.RNNModel
+params:
+  cell: gru
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+  bidirectional: false
+training:
+  epochs: 30
+  batch_size: 512
+  optimizer: adamw
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  loss: focal
+  focal_gamma: 2.0
+  focal_alpha: 0.25
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true

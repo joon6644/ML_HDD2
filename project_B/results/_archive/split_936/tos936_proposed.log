@@ -1,0 +1,67 @@
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+
+=== TOSHIBA_20MG07ACA14TA | gru_tuned_936 | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,048개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 391개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (7.0s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00231 val_pauc=0.86985
+      epoch 01 loss=0.00191 val_pauc=0.87413
+      epoch 02 loss=0.00185 val_pauc=0.87578
+      epoch 03 loss=0.00183 val_pauc=0.87914
+      epoch 04 loss=0.00177 val_pauc=0.88068
+      epoch 05 loss=0.00176 val_pauc=0.88199
+      epoch 06 loss=0.00173 val_pauc=0.88373
+      epoch 07 loss=0.00170 val_pauc=0.89079
+      epoch 08 loss=0.00169 val_pauc=0.89322
+      epoch 09 loss=0.00165 val_pauc=0.88843
+      epoch 10 loss=0.00164 val_pauc=0.89526
+      epoch 11 loss=0.00164 val_pauc=0.89310
+      epoch 12 loss=0.00162 val_pauc=0.89020
+      epoch 13 loss=0.00164 val_pauc=0.88293
+      epoch 14 loss=0.00166 val_pauc=0.88442
+      epoch 15 loss=0.00164 val_pauc=0.88802
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0525 P 0.037 R 0.601 | disk: P 0.074 R 0.655 FAR 0.0064 (fit 289.5s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tos936_proposed
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+--- 학습 rc=0 ---
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 53개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 93개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 138개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | gru_tuned_936 | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tos936_proposed_long.csv  (24 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tos936_proposed_summary.csv  (4 행)
+--- export1 rc=0 ---
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 189개 (0.03%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 2,351개 (0.30%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 402개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 349개 (0.05%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 1,238개 (0.16%) 를 복제 패딩 + mask 채널로 채운다.
+  TOSHIBA_20MG07ACA14TA | gru_tuned_936 | seed 42 채점 완료
+
+[원자료] results\tos936_proposed_oracle_long.csv  (24 행)
+[요약]   results\tos936_proposed_oracle_summary.csv  (4 행)
+--- export2 rc=0 ---

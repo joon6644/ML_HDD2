@@ -1,0 +1,120 @@
+=== tos936_trees ===
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+
+=== TOSHIBA_20MG07ACA14TA | randomforest | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (5.4s)
+  test  row: PR-AUC 0.0933 P 0.027 R 0.679 | disk: P 0.058 R 0.690 FAR 0.0087 (fit 850.7s)
+
+=== TOSHIBA_20MG07ACA14TA | xgboost | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (5.8s)
+  test  row: PR-AUC 0.0782 P 0.037 R 0.619 | disk: P 0.088 R 0.690 FAR 0.0056 (fit 105.8s)
+
+=== TOSHIBA_20MG07ACA14TA | lightgbm | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (6.1s)
+  test  row: PR-AUC 0.0797 P 0.038 R 0.665 | disk: P 0.071 R 0.621 FAR 0.0063 (fit 51.7s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tos936_trees
+결과 집계: python scripts/aggregate_results.py <experiment_name>
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+  TOSHIBA_20MG07ACA14TA | randomforest | seed 42 채점 완료
+  TOSHIBA_20MG07ACA14TA | xgboost | seed 42 채점 완료
+  TOSHIBA_20MG07ACA14TA | lightgbm | seed 42 채점 완료
+
+[원자료] C:\Workspace\projects\26_2_COIN\project_B\results\tos936_trees_long.csv  (72 행)
+[요약]   C:\Workspace\projects\26_2_COIN\project_B\results\tos936_trees_summary.csv  (12 행)
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+  TOSHIBA_20MG07ACA14TA | randomforest | seed 42 채점 완료
+  TOSHIBA_20MG07ACA14TA | xgboost | seed 42 채점 완료
+  TOSHIBA_20MG07ACA14TA | lightgbm | seed 42 채점 완료
+
+[원자료] results\tos936_trees_oracle_long.csv  (72 행)
+[요약]   results\tos936_trees_oracle_summary.csv  (12 행)
+=== tos936_nn ===
+[canonical] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\canonical\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86
+[features] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\features\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\feat=1982d7246e
+[labels] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\labels\TOSHIBA_20MG07ACA14TA\canon=c3580bdb86\label=37b95c8ddf
+[splits] 재사용: C:\Workspace\projects\26_2_COIN\project_B\data\splits\TOSHIBA_20MG07ACA14TA\split=5cb740b496
+
+=== TOSHIBA_20MG07ACA14TA | mlp_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (5.2s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.01512 val_pr_auc=0.86256
+      epoch 01 loss=0.00192 val_pr_auc=0.87073
+      epoch 02 loss=0.00187 val_pr_auc=0.87665
+      epoch 03 loss=0.00183 val_pr_auc=0.86423
+      epoch 04 loss=0.00180 val_pr_auc=0.87353
+      epoch 05 loss=0.00177 val_pr_auc=0.87483
+      epoch 06 loss=0.00174 val_pr_auc=0.87233
+      epoch 07 loss=0.00171 val_pr_auc=0.87592
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0661 P 0.029 R 0.720 | disk: P 0.060 R 0.724 FAR 0.0089 (fit 55.9s)
+
+=== TOSHIBA_20MG07ACA14TA | lstm_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,048개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 391개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (6.7s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00231 val_pauc=0.87753
+      epoch 01 loss=0.00189 val_pauc=0.88174
+      epoch 02 loss=0.00176 val_pauc=0.87936
+      epoch 03 loss=0.00170 val_pauc=0.88041
+      epoch 04 loss=0.00166 val_pauc=0.88083
+      epoch 05 loss=0.00162 val_pauc=0.87416
+      epoch 06 loss=0.00159 val_pauc=0.87658
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0582 P 0.030 R 0.706 | disk: P 0.065 R 0.759 FAR 0.0084 (fit 512.9s)
+
+=== TOSHIBA_20MG07ACA14TA | gru_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,048개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 391개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (7.9s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00223 val_pauc=0.87195
+      epoch 01 loss=0.00180 val_pauc=0.87897
+      epoch 02 loss=0.00174 val_pauc=0.88151
+      epoch 03 loss=0.00170 val_pauc=0.88242
+      epoch 04 loss=0.00166 val_pauc=0.88954
+      epoch 05 loss=0.00165 val_pauc=0.88267
+      epoch 06 loss=0.00162 val_pauc=0.87452
+      epoch 07 loss=0.00162 val_pauc=0.88080
+      epoch 08 loss=0.00160 val_pauc=0.88110
+      epoch 09 loss=0.00159 val_pauc=0.87428
+      early stopping (patience 5)
+  test  row: PR-AUC 0.0600 P 0.041 R 0.647 | disk: P 0.073 R 0.621 FAR 0.0062 (fit 588.0s)
+
+=== TOSHIBA_20MG07ACA14TA | tcn_pauc | seed 42 | fold 00 (test 2025-10) ===
+  train 행렬 예상 0.6 GB (9,899,302행 x 16피처). 부족하면 features.yaml 의 train_sampling.strategy 를 stride 로 두어라.
+    [sequence] lookback 14일을 못 채운 표본 1,048개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 391개 (0.01%) 를 복제 패딩 + mask 채널로 채운다.
+    [sequence] lookback 14일을 못 채운 표본 136개 (0.02%) 를 복제 패딩 + mask 채널로 채운다.
+  train 9,899,302 (양성 0.0332%) | val 3,066,938 | test 783,916 (8.7s)
+      loss={'loss': 'bce', 'pos_weight': None}
+      epoch 00 loss=0.00209 val_pauc=0.87157
+      epoch 01 loss=0.00172 val_pauc=0.89347
+      epoch 02 loss=0.00167 val_pauc=0.89050
+      epoch 03 loss=0.00162 val_pauc=0.89280
+      epoch 04 loss=0.00159 val_pauc=0.88813
+      epoch 05 loss=0.00154 val_pauc=0.87716
+      epoch 06 loss=0.00152 val_pauc=0.88508
+      early stopping (patience 5)
+  test  row: PR-AUC 0.1076 P 0.030 R 0.697 | disk: P 0.065 R 0.690 FAR 0.0077 (fit 924.9s)
+
+실험 완료: C:\Workspace\projects\26_2_COIN\project_B\runs\tos936_nn
+결과 집계: python scripts/aggregate_results.py <experiment_name>

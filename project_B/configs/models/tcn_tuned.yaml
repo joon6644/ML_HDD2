@@ -1,0 +1,31 @@
+# Optuna 로 고른 TCN 하이퍼파라미터.
+#   탐색: 시드 42 의 val 부분 AUC(FAR <= 5%) 최대화
+#   val 점수는 월별 창으로 접는다 (test 와 같은 단위).
+#   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.
+#   수용 영역 29 >= lookback 14 (Bai et al. 2018 규칙).
+#   scripts/run_optuna_tcn.py 가 생성한다. 직접 고치지 마라.
+
+name: tcn_tuned
+family: sequence
+class: hddpred.models.sequence.TCNModel
+params:
+  channels:
+  - 32
+  - 32
+  - 32
+  kernel_size: 3
+  dropout: 0.09829118084002675
+  causal: true
+training:
+  epochs: 30
+  optimizer: adamw
+  loss: bce
+  auto_pos_weight: false
+  early_stopping_patience: 5
+  early_stopping_metric: val_pauc
+  grad_clip: 1.0
+  num_workers: 0
+  amp: true
+  learning_rate: 0.0005463240777949559
+  weight_decay: 0.0019229718174853703
+  batch_size: 1024
