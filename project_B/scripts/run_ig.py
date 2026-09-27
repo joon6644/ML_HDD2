@@ -371,23 +371,6 @@ def draw(ig, val, columns, rng, drop_mask=False, suffix=""):
     from matplotlib.colors import PowerNorm
     from matplotlib.ticker import FormatStrFormatter
 
-    # 축 라벨용 이름. 대부분 벤더 공통 정의지만 226 은 제조사마다 갈리므로
-    # 본문에서 단정하지 않는다.
-    SMART_NAME = {
-        # smartmontools drivedb.h (RELEASE_7_5) 의 DEFAULT 항목 기준.
-        # 이 드라이브는 "TOSHIBA MG07ACA1[24]T[AE]Y?" 항목에 매칭되며 속성
-        # 재정의가 없어 표준 정의가 그대로 적용된다. 밑줄만 공백으로 바꾸고
-        # 표기는 원문을 유지한다 — 임의로 다듬으면 근거가 흐려진다.
-        "3": "Spin Up Time", "4": "Start Stop Count",
-        "5": "Reallocated Sector Ct", "9": "Power On Hours",
-        "12": "Power Cycle Count", "191": "G-Sense Error Rate",
-        "192": "Power-Off Retract Count", "193": "Load Cycle Count",
-        "194": "Temperature Celsius", "196": "Reallocated Event Count",
-        "197": "Current Pending Sector", "198": "Offline Uncorrectable",
-        "199": "UDMA CRC Error Count", "220": "Disk Shift",
-        "222": "Loaded Hours", "226": "Load-in Time",
-    }
-
     M = np.abs(ig).mean(axis=0)                    # (T, F)
     hcols = list(clean)
     if drop_mask and "_mask" in hcols:
@@ -402,14 +385,24 @@ def draw(ig, val, columns, rng, drop_mask=False, suffix=""):
     im = hx.imshow(H, aspect="auto", cmap="viridis", norm=PowerNorm(gamma=0.5),
                    extent=(-0.5, T_ - 0.5, len(pick) - 0.5, -0.5))
     # 시간은 왼쪽에서 오른쪽으로 흐른다. 창 첫날이 왼쪽, 예측일이 오른쪽.
-    hx.set_xticks(range(T_)); hx.set_xticklabels(range(T_ - 1, -1, -1), fontsize=8)
+    # 가장 최근 시점부터 거슬러 센 순번. 14 가 창의 첫날, 1 이 예측 시점이다.
+    #   - "13 … 0" 은 이 분야에서 흔한 "Days before Actual Failure" 축(0 = 고장일)
+    #     과 헷갈린다.
+    #   - "1 … 14" 는 시계열의 lag 1(가장 최근 과거) 관습과 방향이 반대라
+    #     축만 보고 순서를 거꾸로 읽을 수 있다.
+    # 내림차순이면 1 이 가장 최근이라는 직관과 맞고 0 도 나오지 않는다.
+    hx.set_xticks(range(T_))
+    hx.set_xticklabels(range(T_, 0, -1), fontsize=8)
     hx.set_yticks(range(len(pick)))
     # 이름을 앞, 번호를 괄호로 뒤에. 축이 우측 정렬이라 번호가 뒤에 있어야
     # 축 옆에서 세로로 가지런히 맞는다.
-    hx.set_yticklabels(
-        [f"{SMART_NAME[c]} ({c})" if c in SMART_NAME else c
-         for c in (hcols[i] for i in pick)], fontsize=8.5)
-    hx.set_xlabel("Days before prediction (0 = prediction day)")
+    # 세로축은 SMART 번호만 쓴다. 번호가 이 분야의 표준 식별자이고,
+    # 2장·4.3 본문이 같은 번호로 속성을 가리킨다. 명칭은 본문이 상위
+    # 속성의 첫 등장에서 한 번 병기한다 — 그림과 본문의 식별자를 하나로
+    # 맞추고, 축 라벨이 짧아져 히트맵 가로가 넓어진다.
+    hx.set_yticklabels([f"SMART {c}" for c in (hcols[i] for i in pick)],
+                       fontsize=8.5)
+    hx.set_xlabel("Position in the input window (1 = prediction time)")
     hx.set_title("Integrated Gradients: Feature × Time", fontsize=11)
     hx.tick_params(axis="x", length=3, width=0.8, direction="out")
     hx.tick_params(axis="y", length=0)
@@ -419,22 +412,18 @@ def draw(ig, val, columns, rng, drop_mask=False, suffix=""):
     cb.ax.yaxis.set_major_formatter(FormatStrFormatter("%.2f"))
     cb.ax.tick_params(labelsize=8)
     fig.tight_layout()
-    # 저장 범위를 직접 잡는다. bbox_inches="tight" 로 자르면 왼쪽 속성명이
-    # 색 막대보다 훨씬 넓어서 히트맵이 그림 오른쪽으로 치우친다. 본문에
-    # 가운데 정렬로 넣으면 그 치우침이 그대로 보이므로, 짧은 쪽에 여백을
-    # 채워 히트맵 가로 중심을 그림 중심에 맞춘다.
+    # 세로축을 SMART 번호로 바꾸면서 라벨 폭이 줄었다. tight_layout 에
+    # 맡기면 남는 폭을 히트맵이 먹어 지면에서 그림만 커진다(단 폭에 맞춰
+    # 축소되므로 저장 폭이 좁을수록 히트맵이 커진다). 속성명을 싣던 판의
+    # 배치를 그대로 고정해 히트맵의 지면 크기를 유지한다.
+    hx.set_position([0.2014, 0.1417, 0.6857, 0.7677])
+    cb.ax.set_position([0.8979, 0.1417, 0.0174, 0.7677])
+    # 저장 범위도 그 판의 값으로 고정한다. 라벨이 짧아진 만큼 tight bbox
+    # 가 왼쪽을 바싹 자르면, 같은 단 폭에 넣었을 때 히트맵만 커진다.
+    # 폭·높이를 붙박아 두면 지면에서 차지하는 크기가 이전 판과 같다.
     from matplotlib.transforms import Bbox
-    PAD = 0.05                                  # bbox_inches="tight" 기본 여백
-    fig.canvas.draw()
-    rend = fig.canvas.get_renderer()
-    tb = fig.get_tightbbox(rend)
-    ab = hx.get_window_extent(rend).transformed(fig.dpi_scale_trans.inverted())
-    x0, x1 = tb.x0 - PAD, tb.x1 + PAD
-    slack = (ab.x0 + ab.x1) - (x0 + x1)         # 양수면 오른쪽이 짧다
-    x1 += max(slack, 0.0)
-    x0 += min(slack, 0.0)
     fig.savefig(ROOT / "results" / f"ig_heatmap{suffix}.png",
-                bbox_inches=Bbox([[x0, tb.y0 - PAD], [x1, tb.y1 + PAD]]))
+                bbox_inches=Bbox([[0.1000, 0.1000], [9.2771, 3.8000]]))
     plt.close(fig)
 
     for name in ("ig_summary.png", "ig_time_importance.png", "ig_heatmap.png",

@@ -59,16 +59,28 @@ ARM_SETS = {
         ("Optimized GRU", "tos_proposed",  "gru_tuned", "#2e6fb7", 2.0, "-"),
     ],
     # 검증 풀링 목적함수로 탐색한 판 (논문 확정본).
+    #
+    # 범례는 모델 이름을 쓰지 않는다. 표 1 의 "GRU" 는 탐색 후 모델이라
+    # 여기서 회색 곡선을 GRU 로 부르면 같은 이름이 두 모델을 가리킨다.
+    # 모델 이름은 캡션이 밝히고, 범례는 두 곡선을 가르기만 한다.
     "pool": [
-        ("GRU",           "toslb_14_pauc", "gru_pauc",       "#8a8a8a", 1.6, "--"),
-        ("Optimized GRU", "tos_pool_gru",  "gru_tuned_pool", "#2e6fb7", 2.0, "-"),
+        ("Before tuning", "toslb_14_pauc", "gru_pauc",       "#8a8a8a", 1.6, "--"),
+        ("After tuning",   "tos_pool_gru",  "gru_tuned_pool", "#2e6fb7", 2.0, "-"),
     ],
     "tcn": [
         ("TCN",           "tcnlb_14_pauc",    "tcn_pauc",  "#8a8a8a", 1.6, "--"),
         ("Optimized TCN", "tos_proposed_tcn", "tcn_tuned", "#2e6fb7", 2.0, "-"),
     ],
+    # 목적함수 대조 — 같은 탐색 공간·시드·시행수에서 목적함수만 바꾼 판을
+    # 확정본 위에 겹친다. 범례가 "무엇으로 튜닝했는가" 축으로 바뀌므로
+    # "After tuning" 을 쓰지 않는다. 두 튜닝본이 모두 "after" 다.
+    "obj": [
+        ("Before tuning",    "toslb_14_pauc",  "gru_pauc",         "#8a8a8a", 1.6, "--"),
+        ("Tuned on pAUC",    "tos_pool_gru",   "gru_tuned_pool",   "#2e6fb7", 2.0, "-"),
+        ("Tuned on ROC-AUC", "tos_rocauc_gru", "gru_tuned_rocauc", "#d1651a", 2.0, "-."),
+    ],
 }
-SUFFIX = {"gru": "_mean", "pool": "", "tcn": "_tcn"}
+SUFFIX = {"gru": "_mean", "pool": "", "tcn": "_tcn", "obj": "_obj"}
 ARMS = ARM_SETS["gru"]        # main 에서 --arms 에 맞춰 다시 묶는다
 # 관심 구간만 본다. pAUC@FAR<=5% 가 적분하는 범위와 같아서, 그림의 곡선
 # 아래 면적이 곧 그 지표가 된다.
@@ -145,7 +157,8 @@ def main() -> int:
         z = np.load(npz_path)
         # 범례 이름을 바꿔도 예전 npz 를 계속 쓸 수 있게, 키가 없으면
         # experiment/model 로 저장된 별칭을 찾는다.
-        alias = {"Optimized GRU": "GRU (tuned)", "GRU": "GRU (default)"}
+        alias = {"Optimized GRU": "GRU (tuned)", "GRU": "GRU (default)",
+                 "After tuning": "Optimized GRU", "Before tuning": "GRU"}
         for label, _, _, _, _, _ in ARMS:
             key = label if label in z.files else alias.get(label, label)
             results[label] = z[key]
@@ -177,24 +190,38 @@ def main() -> int:
     # 37,200대 기준 오탐 7~8대라 재현율 눈금이 거칠고 달마다 요동친다.
     # 대신 곡선 아래 면적이 더는 pAUC 와 일치하지 않으므로, 캡션과 본문에
     # "적분 범위" 가 아니라 "오탐률 수준에 따른 탐지 성능" 으로 쓴다.
-    from matplotlib.ticker import NullFormatter, NullLocator, FixedLocator, FixedFormatter
+    from matplotlib.ticker import (FixedFormatter, FixedLocator, NullFormatter,
+                                   NullLocator)
     ax.set_xscale("log")
     ax.set_xlim(0.1, 5)
+    # 눈금은 로그 공간에서 고르게 여섯 개. 본문이 드는 값(0.15 / 0.39 /
+    # 0.82 / 2.5)이 모두 눈금 사이에 들어와 위치를 짚을 수 있다. 여기서 더
+    # 늘리면 0.2-0.3 과 2-3 이 붙어 어수선해진다. 부눈금은 넣지 않는다 —
+    # 주눈금이 10의 거듭제곱이 아니라 구간마다 개수가 달라진다.
+    ax.xaxis.set_major_locator(FixedLocator([0.1, 0.2, 0.5, 1, 2, 5]))
+    ax.xaxis.set_major_formatter(
+        FixedFormatter(["0.1", "0.2", "0.5", "1", "2", "5"]))
     ax.xaxis.set_minor_locator(NullLocator())
     ax.xaxis.set_minor_formatter(NullFormatter())
-    ax.xaxis.set_major_locator(FixedLocator([0.1, 0.2, 0.5, 1, 2, 5]))
-    ax.xaxis.set_major_formatter(FixedFormatter(["0.1", "0.2", "0.5", "1", "2", "5"]))
-    ax.set_ylim(0.2, 0.9)
-    ax.set_xlabel("False Positive Rate (%)")
-    ax.set_ylabel("Recall")
+    ax.tick_params(axis="x", which="major", length=5)
+    # 곡선이 0.2 아래로 내려가면 축선에 붙어 잘린 것처럼 보인다.
+    # 확정본(곡선 둘)은 최저가 0.27 이라 0.2 가 그대로 유지된다.
+    # GRID 는 0.02% 부터지만 축은 0.1% 부터다. 보이는 범위에서만 최저를 찾는다.
+    vis = GRID * 100 >= 0.1
+    lo = min(float(results[l].mean(axis=0)[vis].min()) for l, *_ in ARMS)
+    ax.set_ylim(min(0.2, np.floor(lo * 20) / 20 - 0.05), 0.9)
+    # 2단 조판에서 그림이 한 단 폭으로 줄어들어 기본 크기로는 라벨이 작다.
+    ax.set_xlabel("False Positive Rate (%, log scale)", fontsize=13.5)
+    ax.set_ylabel("Recall", fontsize=13.5)
     ax.grid(True, which="major", alpha=0.25, lw=0.6)
     # 네모 박스: 네 변을 모두 남긴다.
     for side in ("top", "right", "bottom", "left"):
         ax.spines[side].set_visible(True)
         ax.spines[side].set_linewidth(0.8)
     # 곡선이 둘이라 범례가 필요하다. 곡선이 오른쪽 위로 붙으므로 아래가 빈다.
-    ax.legend(loc="lower right", frameon=True, framealpha=0.95,
-              edgecolor="0.8", fontsize=9)
+    # 곡선이 왼쪽 아래에서 오른쪽 위로 오르므로 좌측 상단이 비어 있다.
+    ax.legend(loc="upper left", frameon=True, framealpha=0.95,
+              edgecolor="0.8", fontsize=10)
     fig.tight_layout()
     out = ROOT / "results" / f"recall_far_curve{suffix}.png"
     fig.savefig(out)

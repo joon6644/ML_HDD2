@@ -316,8 +316,9 @@ def main() -> int:
             t0 = time.time()
             study.optimize(objective, n_trials=1, catch=(Exception,))
             last = study.trials[-1]
+            obj_name = "ROC-AUC" if args.objective == "rocauc" else "pAUC"
             mark = ("pruned" if str(last.state) == "TrialState.PRUNED"
-                    else f"pAUC={last.value:.4f}")
+                    else f"{obj_name}={last.value:.4f}")
             best = study.best_value if any(
                 t.value is not None for t in study.trials) else float("nan")
             print(f"  [{done + n + 1:>3}/{args.trials}] {mark}  "
@@ -362,14 +363,21 @@ def main() -> int:
         },
         "training": {
             **FIXED_TRAINING,
+            # 탐색 중 조기종료 감시값을 목적함수에 맞춰 바꿨으므로(monitor),
+            # 저장본도 같아야 한다. FIXED_TRAINING 의 val_pauc 를 그대로
+            # 내보내면 최종 학습만 다른 지표로 멈춘다.
+            "early_stopping_metric": ("val_roc_auc" if args.objective == "rocauc"
+                                      else FIXED_TRAINING["early_stopping_metric"]),
             "learning_rate": float(chosen["learning_rate"]),
             "weight_decay": float(chosen["weight_decay"]),
             "batch_size": int(chosen["batch_size"]),
         },
     }
+    obj_label = ("ROC-AUC" if args.objective == "rocauc"
+                 else f"부분 AUC(FAR <= {PAUC_MAX_FPR:.0%})")
     header = (
         "# Optuna 로 고른 GRU 하이퍼파라미터.\n"
-        f"#   탐색: 시드 {SEED} 의 val 부분 AUC(FAR <= {PAUC_MAX_FPR:.0%}) 최대화\n"
+        f"#   탐색: 시드 {SEED} 의 val {obj_label} 최대화\n"
         f"#   분할·피처: {args.base_experiment}\n"
         "#   val 점수는 월별 창으로 접는다 (test 와 같은 단위).\n"
         "#   test 는 탐색에 쓰지 않았다. 확정 후 따로 채점한다.\n"

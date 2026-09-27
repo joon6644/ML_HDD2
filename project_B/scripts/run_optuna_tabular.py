@@ -79,7 +79,7 @@ FIXED = {
         {"batch_norm": True},
         {"epochs": 30, "loss": "bce", "auto_pos_weight": False,
          "early_stopping_patience": 5, "early_stopping_metric": "val_pauc",
-         "scaling": {"method": "standard", "clip_quantile": [0.001, 0.999]}},
+         "scaling": {"method": "minmax", "clip_quantile": [0.001, 0.999]}},
     ),
 }
 
@@ -133,7 +133,8 @@ def suggest(trial, name: str) -> tuple[dict, dict]:
     return params, training
 
 
-def val_pauc(model, parts, aggregate: str = "mean") -> tuple[float, float]:
+def val_pauc(model, parts, aggregate: str = "mean",
+             objective: str = "pauc") -> tuple[float, float]:
     """검증 구간의 부분 AUC와 FAR 1% 재현율. 창마다 산출한 뒤 평균한다.
 
     run_optuna_rnn.val_pauc 와 같은 함수다. 풀링하지 않는다 (3.4 집계 규칙).
@@ -150,7 +151,10 @@ def val_pauc(model, parts, aggregate: str = "mean") -> tuple[float, float]:
             ranks.append(score)
             flags.append(actual)
             continue
-        paucs.append(float(roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR)))
+        paucs.append(float(
+            roc_auc_score(actual, score)
+            if objective == "rocauc"
+            else roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR)))
         thr = float(np.quantile(score[actual == 0], 0.99))
         recalls.append(float(((score >= thr) & (actual == 1)).sum() / n_pos))
     if aggregate == "pool":
@@ -158,7 +162,9 @@ def val_pauc(model, parts, aggregate: str = "mean") -> tuple[float, float]:
             return float("nan"), float("nan")
         score = np.concatenate(ranks)
         actual = np.concatenate(flags)
-        pauc = float(roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
+        pauc = float(roc_auc_score(actual, score)
+                     if objective == "rocauc"
+                     else roc_auc_score(actual, score, max_fpr=PAUC_MAX_FPR))
         thr = float(np.quantile(score[actual == 0], 0.99))
         rec = float(((score >= thr) & (actual == 1)).sum() / int(actual.sum()))
         return pauc, rec
@@ -167,7 +173,7 @@ def val_pauc(model, parts, aggregate: str = "mean") -> tuple[float, float]:
     return float(np.mean(paucs)), float(np.mean(recalls))
 
 
-def write_config(name: str, frame, tag: str) -> Path:
+def write_config(name: str, frame, tag: str, objective: str = "pauc") -> Path:
     """1위 시행을 모델 yaml 로 굳힌다. run_experiment.py 가 바로 읽는다."""
     best = frame.iloc[0]
     trial_params = {k: best[k] for k in frame.columns
@@ -190,16 +196,21 @@ def write_config(name: str, frame, tag: str) -> Path:
 
     params, training = suggest(_T(trial_params), name)
     cls = MODELS[name]
+    # 목적함수가 곧 이름이다. rocauc 판을 pauc_tuned 로 저장하면
+    # 어느 목적함수로 고른 설정인지 파일명이 거짓말을 한다.
+    stem = f"{name}_{objective}_tuned{tag}"
+    obj_label = ("val ROC-AUC" if objective == "rocauc"
+                 else f"val pAUC@FAR<={PAUC_MAX_FPR:.0%}")
     out = {
-        "name": f"{name}_pauc_tuned{tag}",
+        "name": stem,
         "family": "tabular",
         "class": f"{cls.__module__}.{cls.__name__}",
         "params": params,
         "training": training,
     }
-    path = ROOT / "configs" / "models" / f"{name}_pauc_tuned{tag}.yaml"
+    path = ROOT / "configs" / "models" / f"{stem}.yaml"
     path.write_text(
-        f"# {name} 탐색 1위 (val pAUC@FAR<=5% {best.pauc:.4f}, trial {int(best.trial)}).\n"
+        f"# {name} 탐색 1위 ({obj_label} {best.pauc:.4f}, trial {int(best.trial)}).\n"
         "# scripts/run_optuna_tabular.py 가 생성한다. 손으로 고치지 말 것.\n\n"
         + yaml.safe_dump(out, allow_unicode=True, sort_keys=False),
         encoding="utf-8")
@@ -215,10 +226,18 @@ def main() -> int:
     ap.add_argument("--tag", default="")
     ap.add_argument("--val-aggregate", default="mean", choices=["mean", "pool"],
                     help="검증 목적함수의 집계 방식 (보고 지표와 무관)")
+    ap.add_argument("--objective", default="pauc", choices=["pauc", "rocauc"],
+                    help="탐색 목적함수. rocauc 는 최적화 구간을 바꿔 보는 대조 "
+                         "실험용이다. 조기종료 지표(aucpr 등)는 그대로 둔다 — "
+                         "원판에서도 목적함수와 분리돼 있었다")
     args = ap.parse_args()
     tag = f"_{args.tag}" if args.tag else ""
     name = args.model
     study_name = STUDY_NAME_FMT.format(model=name, tag=tag)
+    if args.objective == "rocauc":
+        # 목적함수가 다르면 다른 study 다. 같은 이름에 이어 붙이면
+        # 척도가 다른 값이 한 TPE 안에 섞인다.
+        study_name = study_name.replace("_pauc5_", "_roc_")
 
     import optuna
 
@@ -271,7 +290,8 @@ def main() -> int:
             model.fit(train, val_full)
             if name == "mlp":
                 model.epoch_callback = None
-            score, recall01 = val_pauc(model, val_months, args.val_aggregate)
+            score, recall01 = val_pauc(model, val_months, args.val_aggregate,
+                                       args.objective)
             trial.set_user_attr("pauc", score)
             trial.set_user_attr("recall01", recall01)
             return score
@@ -284,8 +304,9 @@ def main() -> int:
             t0 = time.time()
             study.optimize(objective, n_trials=1, catch=(Exception,))
             last = study.trials[-1]
+            obj_name = "ROC-AUC" if args.objective == "rocauc" else "pAUC"
             mark = ("pruned" if str(last.state) == "TrialState.PRUNED"
-                    else f"pAUC={last.value:.4f}" if last.value is not None
+                    else f"{obj_name}={last.value:.4f}" if last.value is not None
                     else str(last.state))
             best = study.best_value if any(
                 t.value is not None for t in study.trials) else float("nan")
@@ -302,9 +323,11 @@ def main() -> int:
         print("완료된 시행이 없다.")
         return 1
     frame = pd.DataFrame(rows).sort_values("pauc", ascending=False)
-    csv = RESULT_DIR / f"optuna_{name}{tag}_trials.csv"
+    # 목적함수를 파일명에 넣지 않으면 rocauc 판이 pauc 판 CSV 를 덮는다.
+    obj_sfx = "_rocauc" if args.objective == "rocauc" else ""
+    csv = RESULT_DIR / f"optuna_{name}{tag}{obj_sfx}_trials.csv"
     frame.to_csv(csv, index=False, encoding="utf-8-sig")
-    cfg_path = write_config(name, frame, tag)
+    cfg_path = write_config(name, frame, tag, args.objective)
     print(f"\n=== {name} 탐색 결과 (완료 {len(frame)}시행) ===")
     print(frame.head(10).to_string(index=False,
                                    float_format=lambda v: f"{v:.4f}"))
