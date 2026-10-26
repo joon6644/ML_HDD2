@@ -128,7 +128,7 @@ def suggest(trial, name: str) -> tuple[dict, dict]:
         training.update(
             learning_rate=trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
             weight_decay=trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True),
-            batch_size=trial.suggest_categorical("batch_size", [1024, 2048, 4096]),
+            batch_size=2048,   # 탐색에서 뺐다. run_optuna_rnn 의 주석 참조
         )
     return params, training
 

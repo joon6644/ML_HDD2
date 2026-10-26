@@ -119,7 +119,11 @@ def suggest(trial, cell: str):
         "weight_decay": trial.suggest_float("weight_decay", 1e-6, 1e-2, log=True),
         # 256 은 뺐다. 실측에서 batch 256 조합이 1,729초로 512(643초)의 2.7배였다.
         # 스텝 수가 두 배가 되는데 이 문제에서 작은 배치의 이점은 확인된 바 없다.
-        "batch_size": trial.suggest_categorical("batch_size", [512, 1024, 2048]),
+        # 배치는 탐색에서 뺐다. 실측(lookback 30, 에포크 순연산)으로
+        # 512=67.5s / 1024=36.2s / 2048=23.6s / 4096=21.4s 였고, 2048 위로는
+        # 커널이 포화해 더 줄지 않는다. 2048 은 기존 탐색 공간 안의 값이고
+        # LSTM 이 실제로 고른 값이다. 탐색 축을 하나 줄여 시행을 빠르게 한다.
+        "batch_size": 2048,
     }
     return params, training
 
