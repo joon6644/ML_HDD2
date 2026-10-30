@@ -78,6 +78,8 @@ STUDY_DB = ROOT / "runs" / "optuna" / "rnn.db"
 RESULT_DIR = ROOT / "results"
 
 # 고정값. 불균형 처리를 하지 않는다는 확정 사항이 여기 박혀 있다.
+FIXED_BATCH = 2048      # suggest() 의 고정 배치와 같아야 한다
+
 FIXED_TRAINING = {
     "epochs": 30,
     "optimizer": "adamw",
@@ -123,7 +125,7 @@ def suggest(trial, cell: str):
         # 512=67.5s / 1024=36.2s / 2048=23.6s / 4096=21.4s 였고, 2048 위로는
         # 커널이 포화해 더 줄지 않는다. 2048 은 기존 탐색 공간 안의 값이고
         # LSTM 이 실제로 고른 값이다. 탐색 축을 하나 줄여 시행을 빠르게 한다.
-        "batch_size": 2048,
+        "batch_size": FIXED_BATCH,
     }
     return params, training
 
@@ -374,7 +376,9 @@ def main() -> int:
                                       else FIXED_TRAINING["early_stopping_metric"]),
             "learning_rate": float(chosen["learning_rate"]),
             "weight_decay": float(chosen["weight_decay"]),
-            "batch_size": int(chosen["batch_size"]),
+            # 배치는 탐색 축이 아니므로 trial.params 에 없다. suggest() 가
+            # 쓰는 고정값을 그대로 내보낸다.
+            "batch_size": FIXED_BATCH,
         },
     }
     obj_label = ("ROC-AUC" if args.objective == "rocauc"

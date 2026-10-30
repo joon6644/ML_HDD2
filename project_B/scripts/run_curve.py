@@ -79,8 +79,14 @@ ARM_SETS = {
         ("Tuned on pAUC",    "tos_pool_gru",   "gru_tuned_pool",   "#2e6fb7", 2.0, "-"),
         ("Tuned on ROC-AUC", "tos_rocauc_gru", "gru_tuned_rocauc", "#d1651a", 2.0, "-."),
     ],
+    # 입력 윈도우 30일 판 (검토용). 탐색 전·후 모두 lookback 30. 논문 그림 1(pool)과
+    # 같은 형식이고, 산출물은 _lb30 으로 분리한다.
+    "lb30": [
+        ("Before tuning", "toslb_30_pauc", "gru_pauc",       "#8a8a8a", 1.6, "--"),
+        ("After tuning",   "tos30_gru",     "gru_tuned_lb30", "#2e6fb7", 2.0, "-"),
+    ],
 }
-SUFFIX = {"gru": "_mean", "pool": "", "tcn": "_tcn", "obj": "_obj"}
+SUFFIX = {"gru": "_mean", "pool": "", "tcn": "_tcn", "obj": "_obj", "lb30": "_lb30"}
 ARMS = ARM_SETS["gru"]        # main 에서 --arms 에 맞춰 다시 묶는다
 # 관심 구간만 본다. pAUC@FAR<=5% 가 적분하는 범위와 같아서, 그림의 곡선
 # 아래 면적이 곧 그 지표가 된다.
